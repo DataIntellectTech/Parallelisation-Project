@@ -1,0 +1,4 @@
+*.lic
+results/
+logs/
+.idea/workspace.xml

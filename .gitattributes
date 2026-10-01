@@ -1,0 +1,3 @@
+# Keep LF endings so scripts work on homer when edited from Windows
+* text=auto eol=lf
+*.zip binary
