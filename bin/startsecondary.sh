@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # start one secondary process
-# bin/startsecondary.sh 1 default: config/default.env
+# bin/startsecondary.sh 1 config/default.env
 # id is 1, 2, 3 ... and decides the port: SECONDARY_BASE_PORT + id - 1
 set -euo pipefail
 
