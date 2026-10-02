@@ -1,4 +1,6 @@
 // this is a secondary process: it runs tasks the master sends it and reports back
+// example run
+// x src/secondary.q  -p 45001 -id 1
 
 // load in common code libs
 // todo: change this in the future to load in the entire common code or all files with an each
@@ -9,11 +11,7 @@ system"l src/common/log.q";
 .secondary.opts:.Q.opt .z.x;
 .secondary.id:"J"$first .secondary.opts`id;
 
-// tag every log line with secondary:<id>, e.g. secondary:1
-.log.component:`$"sec",string .secondary.id;
-
 .secondary.start:{
-  .log.openFile "logs";
   .log.info "secondary ",string[.secondary.id]," started, listening on ",string system "p";
  };
 
