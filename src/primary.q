@@ -3,7 +3,7 @@
 // q src/primary.q -p 45000
 
 // load in schema
-system"l schemas/primaryTables.q";
+system"l schemas/primarytables.q";
 
 // load in common code libs
 // todo: change this in the future to load in the entire common code or all files with an each
