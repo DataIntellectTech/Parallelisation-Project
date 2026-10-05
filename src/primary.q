@@ -18,7 +18,7 @@ system"l src/common/timer.q";
 
 // when a secondary starts add it to the secondaries table
 // example run:
-// .primary.register ([id:5; handle:0i; pid:4000i; host:`localhost; port:45001i ])
+// .primary.register ([id:5; pid:4000i; host:`localhost; port:45001i ])
 .primary.register:{[info]
   `secondaries upsert (info`id; .z.w; info`pid; info`host; info`port; `free; .z.P; 0N; 0Ni; 1b; 0b; .z.P; .z.P; (); 0N);
   .log.info "secondary ", string[info`id], " registered at: ", string .z.P;
@@ -35,7 +35,7 @@ system"l src/common/timer.q";
   if[not count secondaries; :()];
   stale: exec id from secondaries where status=`free, lastheartbeat < .z.P - .primary.stale;
   if[count stale;
-    update status:`stale from secondaries where id in stale;
+    update status:`stale from `secondaries where id in stale;
     .log.warn "no heartbeat from secondary ",(", " sv string stale)];
  };
 

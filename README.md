@@ -23,7 +23,27 @@ bash bin/startsecondary.sh 1
 bash bin/startsecondary.sh 2
 ```
 
-### my notes
+## Testing
+We will use the qspec testing framework here, i have copied it into the project directly
+
+### how to run tests
+From the project top level dir, you run the below commands
+```bash
+tests/run.sh tests/unit                     # a whole folder
+tests/run.sh tests/unit/primary.q           # one file
+```
+
+Example run
+```bash
+jrutledge@homer:~/internalWork/Parallelisation-Project$ tests/run.sh tests/unit/primary.q 
+.
+
+For 1 specifications, 1 expectations were run.
+1 passed, 0 failed.  0 errors.
+jrutledge@homer:~/internalWork/Parallelisation-Project$ 
+```
+
+### my notes ignroe in any PR reviews till the end
 
 ```
 jrutledge@homer:~/internalWork/Parallelisation-Project$ bash bin/startprimary.sh
