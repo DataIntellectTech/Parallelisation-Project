@@ -14,7 +14,6 @@ system"l src/primary.q";
     `.log.warn mock {};
     `.log.info mock {};
     .primary.register ([id:1; pid:4000i; host:`localhost; port:45001i ]);
-    update handle:6i from `secondaries where id = 1; // need to do as we run on handle 0
    };
   should["have 1 secondary present"]{
     1 musteq count secondaries;
@@ -23,12 +22,11 @@ system"l src/primary.q";
     1 musteq first exec id from secondaries;
    };
   should["have handle be 6"]{
-    6i musteq first exec handle from secondaries;
+    0i musteq first exec handle from secondaries;
    };
  };
 
-// should see the above now as stale
-system"sleep 6"
+// should see the above now as stale, uses previous secondary
 .tst.desc[".primary.check will say the connection is stale"]{
   before{
     system"sleep 6";
@@ -39,7 +37,18 @@ system"sleep 6"
    }; 
  };
 
-// can a secondary register
+
 // update it with dummy mem data and check lastupdate is new
-// discoonect and test .z.pc
-// stale check
+.tst.desc[".primary.heartbeatcheck updates secondary status to free"]{
+  before{
+    .primary.heartbeatcheck 100;
+   };
+  should["return status as free"]{
+    `free musteq first exec status from secondaries where id = 1;
+   };
+  should["have memory as 100"]{
+    100 musteq first exec lastmembytes from secondaries where id = 1;
+   };
+ };
+
+// .z.pc in integration testing
