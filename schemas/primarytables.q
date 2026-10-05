@@ -6,32 +6,32 @@ secondaries : ([id: `long$()]
   pid:              `int$();
   host:             `$();
   port:             `int$();
-  status:           `$();            // `idle`busy`stale`disconnected
-  lastHeartbeat:    `timestamp$();
-  lastMemBytes:     `long$();
-  consecutiveFails: `int$();
+  status:           `$();            // `free`busy`stale`closed
+  lastheartbeat:    `timestamp$();
+  lastmembytes:     `long$();
+  consecutivefails: `int$();
   healthy:          `boolean$();
   spawned:          `boolean$();     // if the master created it or it was up from before
-  startTime:        `timestamp$();
-  registeredTime:   `timestamp$();
-  taskTypes:        ();
-  currentTask:      `long$()
+  starttime:        `timestamp$();
+  registeredtime:   `timestamp$();
+  tasktypes:        ();
+  currenttask:      `long$()
  );
 
 // montiro the tasks that are being carried out
-tasks : ([taskId: `long$()]
-  taskType:       `$();
+tasks : ([taskid: `long$()]
+  tasktype:       `$();
   args:           ();
   priority:       `int$();
-  submittedTime:  `timestamp$();
-  timeoutMs:      `long$();
-  retriesMax:     `int$();
-  retryCount:     `int$();
+  submittedtime:  `timestamp$();
+  timeoutms:      `long$();
+  retriesmax:     `int$();
+  retrycount:     `int$();
   state:          `$();            // `queued`dispatched`running`done`failed
-  secondaryId:    `long$();
-  dispatchedTime: `timestamp$();
-  startedTime:    `timestamp$();
-  finishedTime:   `timestamp$();
+  secondaryid:    `long$();
+  dispatchedtime: `timestamp$();
+  startedtime:    `timestamp$();
+  finishedtime:   `timestamp$();
   err:            (); 
   reason:         `$()             // `timeout`unknown`oom
  );
