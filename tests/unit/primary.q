@@ -9,6 +9,20 @@ system"l src/primary.q";
    };
  };
 
+.tst.desc["check table schemas"]{
+  should["return 2 tables"]{
+    2 musteq count tables[];
+   };
+  should["have the correct schema for secondaries table"]{
+    (`id`handle`pid`host`port`status`lastheartbeat`lastmembytes`consecutivefails`healthy`spawned`starttime`registeredtime`tasktypes`currenttask) mustmatch cols secondaries;
+    "jiisispjibbpp j" mustmatch exec t from meta secondaries;
+   };
+  should["have the correct schema for the tasks table"]{
+    (`taskid`tasktype`args`priority`submittedtime`timeoutms`retriesmax`retrycount`state`secondaryid`dispatchedtime`startedtime`finishedtime`err`reason) mustmatch cols tasks;
+    "js ipjiisjppp s" mustmatch exec t from meta tasks;
+   };
+ };
+
 .tst.desc["can a secondary register with .primary.register"]{
   before{
     `.log.warn mock {};
@@ -52,3 +66,4 @@ system"l src/primary.q";
  };
 
 // .z.pc in integration testing
+// add in table checks that meta is correct and all expected tables are present

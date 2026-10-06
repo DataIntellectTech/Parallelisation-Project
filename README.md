@@ -43,7 +43,9 @@ For 1 specifications, 1 expectations were run.
 jrutledge@homer:~/internalWork/Parallelisation-Project$ 
 ```
 
-### my notes ignroe in any PR reviews till the end
+
+
+# my notes ignroe in any PR reviews till the end
 
 ```
 jrutledge@homer:~/internalWork/Parallelisation-Project$ bash bin/startprimary.sh
@@ -65,5 +67,5 @@ pri:hopen `::45000
 
 sec1:hopen `::45001
 ```
-
+### create an images folder or stick them all under docs/images and look at referncing them better
 ![alt text](image.png)
