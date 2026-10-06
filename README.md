@@ -30,7 +30,7 @@ We will use the qspec testing framework here, i have copied it into the project 
 From the project top level dir, you run the below commands
 ```bash
 tests/run.sh tests/unit                     # a whole folder
-tests/run.sh tests/unit/primary.q           # one file
+tests/run.sh tests/unit/primarytests.q      # one file
 ```
 
 Example run
