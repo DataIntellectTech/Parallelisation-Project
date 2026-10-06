@@ -13,7 +13,7 @@ bash bin/startprimary.sh
 ```
 
 ### Secondaries
-These will either be ran as part of the intial start up or the primary will spin up more as needed. They will take the port number `PRIMARY_PORT` + `id` so `secondary 1 `would have a port of `45001` and so on.
+These will either be ran as part of the intial start up or the primary will spin up more as needed. They will take the port number `PRIMARY_PORT` + `id` so `secondary 1` would have a port of `45001` and so on.
 
 ### how to start
 To bring up 2 secondaries run the below
