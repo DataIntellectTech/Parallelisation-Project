@@ -13,7 +13,7 @@ system"l src/common/timer.q";
 .secondary.id: "J"$first .secondary.opts`id;
 .secondary.info:([id: .secondary.id; pid: .z.i; host: .z.h; port: system"p"]);
 
-// used to ocnnect and register with primary
+// used to connect and register with primary
 .secondary.connect:{
   pri:`$"::",getenv `PRIMARY_PORT;
   .log.info "trying to open a handle to primary process on: ",string pri;
