@@ -7,6 +7,8 @@
 // also look at resolving the dir name for a full file path use an env var in the config file
 system"l src/common/log.q";
 system"l src/common/timer.q";
+system"l src/common/os.q";
+
 
 // get the id form start cmd
 .secondary.opts: .Q.opt .z.x;
@@ -17,13 +19,26 @@ system"l src/common/timer.q";
 .secondary.connect:{
   pri:`$"::",getenv `PRIMARY_PORT;
   .log.info "trying to open a handle to primary process on: ",string pri;
-  sech:@[hopen;  pri; {.log.error "the secondary has failed to connect to the primary, failed with error: ",x,". Will exit the process now"; exit 0}];
-  sech
+  sechandle:@[hopen;  pri; {.log.error "the secondary has failed to connect to the primary, failed with error: ",x,". Will exit the process now"; exit 0}];
+  sechandle
  };
 
 // send hb and mem updates to primary
 .secondary.heartbeat:{
   neg[.secondary.handle](`.primary.heartbeatcheck; .Q.w[]`used);
+ };
+
+// called by the primary to kill spawned secondaries
+.secondary.stop:{
+  .log.info "told to stop by the primary, exiting";
+  exit 0;
+ };
+
+// if the primary's connection closes there's nothing to work for, so exit
+.z.pc:{[h]
+  if[not h~.secondary.handle; :()];
+  .log.error "lost the connection to the primary, exiting";
+  exit 1;
  };
 
 // start sequence

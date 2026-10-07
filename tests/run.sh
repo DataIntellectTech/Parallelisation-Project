@@ -12,6 +12,7 @@ fi
 
 set -a
 source config/default.env
+if [[ -n "${EXTRA_ENV:-}" ]]; then source "$EXTRA_ENV"; fi
 set +a
 
 export QHOME="$KDBX_HOME"

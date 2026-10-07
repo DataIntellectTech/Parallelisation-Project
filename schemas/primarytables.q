@@ -18,7 +18,7 @@ secondaries : ([id: `long$()]
   currenttask:      `long$()
  );
 
-// montiro the tasks that are being carried out
+// monitor the tasks that are being carried out
 tasks : ([taskid: `long$()]
   tasktype:       `$();
   args:           ();
