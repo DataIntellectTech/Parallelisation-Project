@@ -21,7 +21,9 @@ system"l src/common/os.q";
 .primary.stopgraceperiod:"J"$getenv`STOP_GRACE_PERIOD_SECS;
 .primary.logdir:getenv`LOG_DIR;
 .primary.qbin:getenv[`KDBX_HOME],"/bin/q";
-
+ .primary.starttime:0Np;
+.primary.secondarystates:`free`busy`stale`closed;
+.primary.taskstates:`queued`dispatched`running`done`failed;
 
 // dict of secondaries ids to their pids that the primary started
 .primary.spawned:(`long$())!`int$();
@@ -49,6 +51,27 @@ system"l src/common/os.q";
     .log.warn "no heartbeat from secondary ",(", " sv string stale)];
  };
 
+
+
+
+// how many of each state appear in the status col, done like this so can have 0 for failed say if no failed in the status col
+.primary.countby:{[states;statuscol] states!sum each statuscol=/:states};
+
+// a snapshot of the primarys status
+.primary.status:{
+  secs:select id, pid, port, status, spawned, lastseen:`time$.z.P-lastheartbeat,lastmembytes from 0!secondaries;
+  ([time: .z.P; uptime: .z.P-.primary.starttime; secondaries: secs; seccounts: .primary.countby[.primary.secondarystates;exec status from secondaries]; taskcounts: .primary.countby[.primary.taskstates;exec state from tasks]])
+ };
+
+// the same snapshot, printed for a person at the console
+.primary.showstatus:{
+  pristatus:.primary.status[];
+  fmt:{[d] ", " sv {[d;k] string[d k]," ",string k}[d] each key d};
+  -1 "== primary status ",string[pristatus`time],"  uptime ",string[pristatus`uptime]," ==";
+  -1 "secondaries: ",fmt pristatus`seccounts;
+  show pristatus`secondaries;
+  -1 "tasks: ",fmt pristatus`taskcounts;
+ };
 
 
 // the one OS call di.os doesn't cover: start q in the background and get its pid
@@ -123,7 +146,8 @@ system"l src/common/os.q";
   if[.primary.spawnsecondaries; .primary.spawn each 1+til .primary.numsecondaries];
   .timer.addjob.custom[`stalecheck; {.primary.check[]}; (); 1; 2; ()!()];
   .log.info "primary started, listening on ",string system "p";
-  };
+  .primary.starttime:: .z.P;
+ };
 
 // start primary
 .primary.start[];

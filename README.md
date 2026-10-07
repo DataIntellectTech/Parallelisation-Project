@@ -12,6 +12,12 @@ cd /home/jrutledge/internalWork/Parallelisation-Project
 bash bin/startprimary.sh
 ```
 
+For starting it interactively do 
+```bash
+bash config/config.sh     # this is jsut a coipy of deaful.coinfig and im doing it for testing atm, will probs move out
+x src/primary.q -p 45000
+```
+
 ### tables
 **secondaries**
 
