@@ -41,8 +41,17 @@ system"l src/common/os.q";
   exit 1;
  };
 
+// we will set any secondarys oom_score to 1000 so it will be shut down first if the OS is out of memory
+.secondary.oomscore:{
+  oomscorepath:"/proc/",string[.z.i],"/oom_score_adj";
+  system "sh -c 'echo 1000 > ",oomscorepath,"'";
+  score:system"cat ",oomscorepath;
+  $[score~"1000"; .log.info "oom_score_adj set to 1000"; .log.warn "could not set oom_score_adj, it is ",score];
+ };
+
 // start sequence
 .secondary.start:{
+  .secondary.oomscore[];
   .secondary.handle:: .secondary.connect[];
   neg[.secondary.handle](`.primary.register; .secondary.info);
   .timer.addjob.custom[`heartbeat; {.secondary.heartbeat[]}; (); 1; 2; ()!()];

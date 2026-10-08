@@ -24,7 +24,9 @@ x src/primary.q -p 45000
 This is a table to monitor the secondary processes used for carrying out tasks assigned by the primary. In this table we track key information such as the `status` of a secondary process.
 
 ### Secondaries
-These will either be ran as part of the intial start up or the primary will spin up more as needed. They will take the port number `PRIMARY_PORT` + `id` so `secondary 1` would have a port of `45001` and so on.
+These will either be ran as part of the intial start up or the primary will spin up more as needed. They will take the port number `PRIMARY_PORT` + `id` so `secondary 1` would have a port of `45001` and so on. A secondary cannot start if the primary process is not up.
+
+We are going to set all secondaries `oom_score` to `1000`. For anyone not familiar with this `-1000` means shut me down last and `1000` means shut me down first in the case we are out of memory. You can check a processes `oom_score` using `cat /proc/<pid>/oom_score`.
 
 ### how to start
 To bring up 2 secondaries run the below
@@ -57,7 +59,8 @@ jrutledge@homer:~/internalWork/Parallelisation-Project$
 ### how to run integration tests
 From project top level dir run the below commands
 ```bash
-bash tests/integration.sh
+bash tests/integration.sh oomscore   # run just the oomscore_spec.q test
+bash tests/integration.sh            # run all integration tests
 ```
 Example output
 ```bash
