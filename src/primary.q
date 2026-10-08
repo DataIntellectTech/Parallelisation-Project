@@ -21,7 +21,7 @@ system"l src/common/os.q";
 .primary.stopgraceperiod:"J"$getenv`STOP_GRACE_PERIOD_SECS;
 .primary.logdir:getenv`LOG_DIR;
 .primary.qbin:getenv[`KDBX_HOME],"/bin/q";
- .primary.starttime:0Np;
+.primary.starttime:0Np;
 .primary.secondarystates:`free`busy`stale`closed;
 .primary.taskstates:`queued`dispatched`running`done`failed;
 
