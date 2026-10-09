@@ -24,9 +24,18 @@ system"l src/common/os.q";
 .primary.starttime:0Np;
 .primary.secondarystates:`free`busy`stale`closed;
 .primary.taskstates:`queued`dispatched`running`done`failed;
+.primary.tasktimeout:`time$"J"$getenv `TASK_TIMEOUT_MS;
+.primary.taskretries:"I"$getenv`TASK_RETRIES_MAX;
+.primary.lasttaskid:0;
+
+
 
 // dict of secondaries ids to their pids that the primary started
 .primary.spawned:(`long$())!`int$();
+
+// defaults for the optional task fields, enqueue fills any missing field from here
+.primary.taskdefaults:([priority:0i; memestimate: 0N; timeout: .primary.tasktimeout; retriesmax: .primary.taskretries]);
+
 
 
 // when a secondary starts add it to the secondaries table
@@ -50,8 +59,6 @@ system"l src/common/os.q";
     update status:`stale from `secondaries where id in stale;
     .log.warn "no heartbeat from secondary ",(", " sv string stale)];
  };
-
-
 
 
 // how many of each state appear in the status col, done like this so can have 0 for failed say if no failed in the status col
@@ -126,9 +133,11 @@ system"l src/common/os.q";
   .log.info "stopped";
  };
 
-
-
-// ipc handlers that need editted
+// tasks will only ever go up
+.primary.nexttaskid:{
+  .primary.lasttaskid+::1;
+  .primary.lasttaskid
+ };
 
 // if a connection is close we need to mark it as closed
 .z.pc:{[h]

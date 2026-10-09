@@ -18,8 +18,8 @@ system"l src/primary.q";
     "jiisispjibbpp j" mustmatch exec t from meta secondaries;
    };
   should["have the correct schema for the tasks table"]{
-    (`taskid`tasktype`args`priority`submittedtime`timeoutms`retriesmax`retrycount`state`secondaryid`dispatchedtime`startedtime`finishedtime`err`reason) mustmatch cols tasks;
-    "js ipjiisjppp s" mustmatch exec t from meta tasks;
+    (`taskid`tasktype`args`priority`submittedtime`memestimate`timeout`retriesmax`retrycount`state`secondaryid`dispatchedtime`startedtime`finishedtime`membefore`memafter`err`reason`result) mustmatch cols tasks;
+    "js ipjtiisjpppjj s " mustmatch exec t from meta tasks;
    };
  };
 

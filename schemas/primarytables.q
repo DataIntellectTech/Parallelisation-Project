@@ -1,4 +1,4 @@
-// tables for the master process
+// tables for the primary process
 
 // monitor the secondary procs 
 secondaries : ([id: `long$()]
@@ -11,7 +11,7 @@ secondaries : ([id: `long$()]
   lastmembytes:     `long$();
   consecutivefails: `int$();
   healthy:          `boolean$();
-  spawned:          `boolean$();     // if the master created it or it was up from before
+  spawned:          `boolean$();     // if the primary created it or it was up from before
   starttime:        `timestamp$();
   registeredtime:   `timestamp$();
   tasktypes:        ();
@@ -24,7 +24,8 @@ tasks : ([taskid: `long$()]
   args:           ();
   priority:       `int$();
   submittedtime:  `timestamp$();
-  timeoutms:      `long$();
+  memestimate:    `long$();
+  timeout:        `time$();
   retriesmax:     `int$();
   retrycount:     `int$();
   state:          `$();            // `queued`dispatched`running`done`failed
@@ -32,6 +33,9 @@ tasks : ([taskid: `long$()]
   dispatchedtime: `timestamp$();
   startedtime:    `timestamp$();
   finishedtime:   `timestamp$();
+  membefore:      `long$();
+  memafter:       `long$();
   err:            (); 
-  reason:         `$()             // `timeout`unknown`oom
+  reason:         `$();            // `timeout`unknown`oom
+  result:         ()
  );
