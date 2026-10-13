@@ -8,6 +8,7 @@
 system"l src/common/log.q";
 system"l src/common/timer.q";
 system"l src/common/os.q";
+system"l src/approvedfunctions.q";
 
 
 // get the id form start cmd
