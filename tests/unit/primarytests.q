@@ -1,4 +1,5 @@
-system"l src/primary.q";
+setenv[`SPAWN_SECONDARY;enlist "0"];
+if[not `primary in key `; system "l src/primary.q"];
 
 .tst.desc["check env vars are as excpected"]{
   should["STALE_MS should be 5 seconds"]{
@@ -12,6 +13,7 @@ system"l src/primary.q";
 .tst.desc["check table schemas"]{
   should["return 2 tables"]{
     2 musteq count tables[];
+    system "l schemas/primarytables.q";
    };
   should["have the correct schema for secondaries table"]{
     (`id`handle`pid`host`port`status`lastheartbeat`lastmembytes`consecutivefails`healthy`spawned`starttime`registeredtime`tasktypes`currenttask) mustmatch cols secondaries;

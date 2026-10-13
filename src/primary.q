@@ -26,6 +26,7 @@ system"l src/common/os.q";
 .primary.taskstates:`queued`dispatched`running`done`failed;
 .primary.tasktimeout:`time$"J"$getenv `TASK_TIMEOUT_MS;
 .primary.taskretries:"I"$getenv`TASK_RETRIES_MAX;
+.primary.tasktypes:`$"," vs getenv`TASK_TYPES;
 .primary.lasttaskid:0;
 
 
@@ -150,12 +151,27 @@ system"l src/common/os.q";
 // add a new tesk to the tasks table
 // task is a dict with tasktype and args always required evry other col is optional 
 .primary.newtask:{[task]
-  // check essential cols are defined
+  if[not 99h=type task;
+    .log.warn "newtask: a task must be a dict"; :0N];
+  if[not all `tasktype`args in key task;
+    .log.warn "newtask: tasktype and args are required"; :0N];
+  if[not task[`tasktype] in .primary.tasktypes;
+    .log.warn "newtask: unknown task type ",string task`tasktype; :0N];  // this can be rejected here before it gets to a secondary
+  if[count bad:key[task] except `tasktype`args,key .primary.taskdefaults;
+    .log.warn "newtask: unknown fields ",", " sv string bad; :0N];
+  tid:.primary.nexttaskid[];
+  data:.primary.taskdefaults,task,
+    ([taskid:tid; args:enlist task`args; submittedtime:.z.P; retrycount:0i; state:`queued; secondaryid:0N; dispatchedtime:0Np; startedtime:0Np;
+    finishedtime:0Np; membefore:0N; memafter:0N; err:""; reason:`; result:enlist (::)]);
+  `tasks upsert data;
+  .log.info "new task ",string[tid]," ",string task`tasktype;
+  tid
  };
 
 // update task status using .primary.taskchange and .primary.statustime
 // params allows us to update other columns eg. maxretires and retrycount
 // if nothing for params it should be an empty dict
+// remove the if statements after we get this working as users should only call .primary.newtask this should be automated
 .primary.taskupdate:{[tid; newstate; params]
   if[not count exec taskid from tasks where taskid=tid; 
     .log.warn"the task id ",string[tid]," is not present in the tasks table";

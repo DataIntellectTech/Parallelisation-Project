@@ -8,6 +8,7 @@ if[not `primary in key `; system "l src/primary.q"];
 .tst.desc[".primary.nexttaskid"]{
   before{
     `.log.info mock {[x] ::};
+    .primary.lasttaskid:0;
     };
   should["start at 1 and go up by one"]{
     0 musteq .primary.lasttaskid;
