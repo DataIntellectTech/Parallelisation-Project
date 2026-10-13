@@ -36,6 +36,13 @@ system"l src/common/os.q";
 // defaults for the optional task fields, enqueue fills any missing field from here
 .primary.taskdefaults:([priority:0i; memestimate: 0N; timeout: .primary.tasktimeout; retriesmax: .primary.taskretries]);
 
+// what each task status can move too
+.primary.taskchange:([queued: enlist `dispatched; dispatched: `running`failed; running: `done`failed; done:`$(); failed:enlist `queued]);
+
+// the time column that gets updated at each task status
+.primary.statustime:([dispatched: `dispatchedtime; running: `startedtime; done: `finishedtime; failed: `finishedtime]);
+
+
 
 
 // when a secondary starts add it to the secondaries table
@@ -137,6 +144,31 @@ system"l src/common/os.q";
 .primary.nexttaskid:{
   .primary.lasttaskid+::1;
   .primary.lasttaskid
+ };
+
+// update task status using .primary.taskchange and .primary.statustime
+// params allows us to update other columns eg. maxretires and retrycount
+// if nothing for params it should be an empty dict
+.primary.taskupdate:{[tid; newstate; params]
+  // check the tasks exists and not completed or failed more than max retires
+  if[not count exec taskid from tasks where taskid=tid; 
+    .log.warn"the task id ",string[tid]," is not present in the tasks table";
+    :0b];
+  // if[ all `retrycount`retriesmax in key params;
+  //   params[retry]
+  //   ];
+  oldstate: first exec state from tasks where taskid=tid;
+  if[not newstate in .primary.taskchange oldstate; 
+    .log.warn"the new task state ",string[newstate],"is not a valid option choose on of the following: ",", " sv string .primary.taskchange oldstate;
+    :0b];
+  // need to update the correct time column depending on the status it is updated too
+  timecol: (enlist .primary.statustime newstate)!enlist .z.P;
+  timecol: $[newstate in key .primary.statustime; (enlist .primary.statustime newstate)!enlist .z.P; ()!()];
+  params: params, timecol, ([taskid: tid; state: newstate]);
+  .log.info "updating task id ",string[tid]," from ",string[oldstate]," to ",string newstate;
+  upsert[`tasks; params];
+  .log.info "updated task id ",string[tid]," from ",string[oldstate]," to ",string newstate;
+  1b
  };
 
 // if a connection is close we need to mark it as closed
