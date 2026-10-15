@@ -171,7 +171,6 @@ system"l src/common/os.q";
 // update task status using .primary.taskchange and .primary.statustime
 // params allows us to update other columns eg. maxretires and retrycount
 // if nothing for params it should be an empty dict
-// remove the if statements after we get this working as users should only call .primary.newtask this should be automated
 .primary.taskupdate:{[tid; newstate; params]
   if[not count exec taskid from tasks where taskid=tid; 
     .log.warn"the task id ",string[tid]," is not present in the tasks table";
@@ -185,6 +184,9 @@ system"l src/common/os.q";
   .log.info "updating task id ",string[tid]," from ",string[oldstate]," to ",string newstate;
   upsert[`tasks; params];
   .log.info "updated task id ",string[tid]," from ",string[oldstate]," to ",string newstate;
+  if[newstate in `done`failed;
+    sid:first exec secondaryid from tasks where taskid=tid;
+    update status:`free, currenttask:0N from `secondaries where id=sid, currenttask=tid, status=`busy];
   1b
  };
 

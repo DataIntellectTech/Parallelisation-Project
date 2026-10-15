@@ -8,7 +8,7 @@
 system"l src/common/log.q";
 system"l src/common/timer.q";
 system"l src/common/os.q";
-system"l src/approvedfunctions.q";
+system"l src/approvedtasks.q";
 
 
 // get the id form start cmd
@@ -48,6 +48,26 @@ system"l src/approvedfunctions.q";
   system "sh -c 'echo 1000 > ",oomscorepath,"'";
   score:system"cat ",oomscorepath;
   $[score~"1000"; .log.info "oom_score_adj set to 1000"; .log.warn "could not set oom_score_adj, it is ",score];
+ };
+
+// send an async message to the primary and flush it straight away
+.secondary.send:{[msg] neg[.secondary.handle] msg; neg[.secondary.handle][]};
+
+// sec tells pri it is starting, record mem before, run task, record mem after result, .Q.gc[],  send result
+.secondary.runtask:{[tid; tasktype; args]
+  .secondary.send (`.primary.taskupdate; tid; `running; ()!());
+  membefore:.Q.w[]`heap;   // went with heap here as it might not register if its a small task on used
+  if[not tasktype in at:key .secondary.approvedtasks;
+    .log.warn "the task ",string[tasktype]," is not in the approved tasks list. Approved tasks are: ",", " sv string at;
+    :.secondary.send (`.primary.taskupdate; tid; `failed; `err`reason`membefore`memafter!("unknown tasktype: ",string tasktype; `error; membefore; membefore))];
+  res:@[{.secondary.approvedtasks[x] y}[tasktype;]; args; {[error] (`failure; error)}];
+  memafter:.Q.w[]`heap;
+  .Q.gc[];
+  if[`failure ~ first res; 
+    .log.warn "task ",string[tid],", failed with error: ",last res;
+    :.secondary.send (`.primary.taskupdate; tid; `failed; `err`reason`membefore`memafter!(last res; `error; membefore; memafter))];
+  .log.info "task ",string[tid]," is complete";
+  .secondary.send (`.primary.taskupdate; tid; `done; `result`membefore`memafter!(enlist res; membefore; memafter));
  };
 
 // start sequence
