@@ -34,7 +34,7 @@ system"l src/common/os.q";
 // dict of secondaries ids to their pids that the primary started
 .primary.spawned:(`long$())!`int$();
 
-// defaults for the optional task fields, enqueue fills any missing field from here
+// defaults for the optional task fields, newtask fills any missing field from here
 .primary.taskdefaults:([priority:0i; memestimate: 0N; timeout: .primary.tasktimeout; retriesmax: .primary.taskretries]);
 
 // what each task status can move too
@@ -88,12 +88,6 @@ system"l src/common/os.q";
   -1 "tasks: ",fmt pristatus`taskcounts;
  };
 
-
-// the one OS call di.os doesn't cover: start q in the background and get its pid
-// a wrapper so unit specs can mock it (system can't be mocked)
-// .primary.run:{[cmd] system cmd}; use in unit testing
-.primary.send:{[h;msg] neg[h] msg; neg[h][]};
-
 // command line for secondary n, e.g. /opt/kdbx/.../q src/secondary.q -p 45002 -id 2
 // look at wrapping in protected execution
 .primary.spawncmd:{[n]
@@ -131,7 +125,7 @@ system"l src/common/os.q";
 .primary.stop:{
   .log.info "stopping secondaries";
   handles:exec handle from secondaries where not null handle, not status=`closed;
-  {[h] @[.primary.send[h;];(`.secondary.stop;::);{[e] ::}]} each handles;   /// no stop sec func on sec.q script
+  {[h] @[neg[h];(`.secondary.stop;::);{[e] ::}]} each handles;   /// no stop sec func on sec.q script
   .os.sleep .primary.stopgraceperiod;
   left:p where .os.exists each "/proc/",/:string p:value .primary.spawned;
   if[count left;
@@ -177,7 +171,7 @@ system"l src/common/os.q";
     :0b];
   oldstate: first exec state from tasks where taskid=tid;
   if[not newstate in .primary.taskchange oldstate; 
-    .log.warn"the new task state ",string[newstate],"is not a valid option choose on of the following: ",", " sv string .primary.taskchange oldstate;
+    .log.warn"the new task state ",string[newstate]," is not a valid option choose on of the following: ",", " sv string .primary.taskchange oldstate;
     :0b];
   timecol: $[newstate in key .primary.statustime; (enlist .primary.statustime newstate)!enlist .z.P; ()!()];
   params: params, timecol, ([taskid: tid; state: newstate]);
@@ -190,6 +184,37 @@ system"l src/common/os.q";
   1b
  };
 
+// sends the task to the secondary, if sending fails early exit and mark as stale
+.primary.sendtask:{[sid; tid]
+  h:first exec handle from secondaries where id=sid;
+  t:tasks tid;
+  update status:`busy, currenttask:tid from `secondaries where id=sid;
+  .primary.taskupdate[tid; `dispatched; ([secondaryid: sid])];
+  res:@[neg[h]; (`.secondary.runtask; tid; t`tasktype; first t`args); {[error] (`sendfailed; error)}];
+  if[`sendfailed~ first res;
+    .log.warn "cannot send task ",string[tid]," to secondary ",string sid;
+    update status:`stale, currenttask: 0N from `secondaries where id=sid;
+    :.primary.taskupdate[tid; `failed; ([err:"send failed with error: ",last res; reason:`sendfailed])];
+   ];
+  .log.info "sent task ",string[tid]," to secondary ",string[sid]," to run task ",string t`tasktype;
+ };
+
+// hand a queued task to a secondary, do it by priority then by oldest first
+// will run on a timer every 1 sec
+.primary.dispatch:{
+  // check for free secondaries
+  freesec: exec id from secondaries where status=`free;
+  // if none free exit
+  if[not count freesec; :()];
+  // get queued tasks
+  qtasks: exec taskid from `priority xdesc select taskid, priority from 0!tasks where state=`queued;
+  // if no tasks exit early
+  n:min count[freesec], count qtasks;
+  if[n=0; :()];
+  // get teh min of both tasks and free secs then run .primary.sendtask for each combo available
+  .primary.sendtask'[n#freesec; n#qtasks];
+ };
+
 // if a connection is close we need to mark it as closed
 .z.pc:{[h]
   secid: first exec id from secondaries where handle=h;
@@ -199,12 +224,13 @@ system"l src/common/os.q";
  };
 
 // quitting the primary kills any spawned secondaries
-.z.exit:{if[count .primary.spawned; .primary.stop[]]};
+.z.exit:{ if[count .primary.spawned; .primary.stop[]]};
 
 // start sequence
-.primary.start:{[]
+.primary.start:{
   if[.primary.spawnsecondaries; .primary.spawn each 1+til .primary.numsecondaries];
   .timer.addjob.custom[`stalecheck; {.primary.check[]}; (); 1; 2; ()!()];
+  .timer.addjob.custom[`dispatch; {.primary.dispatch[]}; (); 1; 2; ()!()];
   .log.info "primary started, listening on ",string system "p";
   .primary.starttime:: .z.P;
  };
