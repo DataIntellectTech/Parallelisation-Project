@@ -218,9 +218,12 @@ system"l src/common/os.q";
 // if a connection is close we need to mark it as closed
 .z.pc:{[h]
   secid: first exec id from secondaries where handle=h;
-  if[null secid; :()];
-  update status:`closed, handle:0Ni from `secondaries where id=secid;
+  tid: first exec currenttask from secondaries where id=secid;
+  update status:`closed, handle:0Ni, currenttask: 0N from `secondaries where id=secid;
   .log.info "secondary ",string[secid]," has closed its connection to the primary";
+  if[not null tid;
+    .primary.taskupdate[tid; `failed; ([err:"secondary lost"; reason:`lost])];
+    .log.warn "task ",string[tid]," was on secondary ",string[secid],", marking it as failed"];
  };
 
 // quitting the primary kills any spawned secondaries
