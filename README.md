@@ -84,7 +84,100 @@ integration: all 2 spec files passed
 jrutledge@homer:~/internalWork/Parallelisation-Project$ 
 ```
 
-## AI Usage
+
+## Manual testing
+
+A guide to manually test and run commands as i feel it give a bit of confidence to run the code yourself at times. It starts a primary with 4 secondaries and runs tasks through them.
+
+### Start the primary
+Go to the directory where you have downloaded hte project to and run the below
+```bash
+set -a; source config/default.env; set +a
+export NUM_SECONDARYS=4
+x src/primary.q -p 45000
+```
+
+Wait a couple of seconds until all 4 secondaries have registered:
+
+```q
+.primary.showstatus[]
+```
+
+You should see something like the below
+```q
+q).primary.showstatus[]
+== primary status 2026.10.16D14:39:06.274222113  uptime 0D00:00:06.864868790 ==
+secondaries: 4 free, 0 busy, 0 stale, 0 closed
+id pid    port  status spawned lastseen     lastmembytes
+--------------------------------------------------------
+1  527736 45001 free   1       00:00:00.552 620432      
+2  527741 45002 free   1       00:00:00.447 620432      
+3  527746 45003 free   1       00:00:00.542 620432      
+4  527750 45004 free   1       00:00:00.438 620432      
+tasks: 0 queued, 0 dispatched, 0 running, 0 done, 0 failed
+```
+
+To watch the secondaries work, open a second terminal and follow today's secondary logs. You'll see a `task N is complete` line for each task:
+
+```bash
+tail -f logs/sec*.$(date +%Y.%m.%d)*.log
+```
+
+### 1. One task, end to end
+
+```q
+// run a task and record its taskid
+t:.primary.newtask `tasktype`args!(`sumtil;1000000)
+// look at the task you just ran
+tasks t
+// you should see all secondaries as free and tasks having 1 done
+.primary.showstatus[]
+```
+
+If you increase the size of the argument to the task it will take longer so you can check the tasks and secondaries table to see different status's. This will also increase the `memafter` column as the `heap` will have increased.
+eg.
+
+```q
+.primary.newtask `tasktype`args!(`sumtil;1000000000)
+```
+
+### 2. Many tasks: 20 one-second sleeps on 4 secondaries
+
+```q
+ids:.primary.newtask each ([] tasktype:20#`sleep; args:20#1)
+```
+
+You can perform the same checks as we did above when just running one task.
+
+
+### 3. Priority: a high-priority task goes ahead of the queue
+
+First fill all 4 secondaries with 5-second tasks, sleep for 2 seconds then send 4 low and 1 high priority task.
+
+```q
+.primary.newtask each ([] tasktype:4#`sleep; args:4#5); system"sleep 2"; lo:.primary.newtask each ([] tasktype:4#`sumtil; args:4#1000); hi:.primary.newtask `tasktype`args`priority!(`sumtil;1000;9i)
+```
+
+If we check the tasks table and when each task was dispatched we will see the high priority task was dispatched before the low priority ones.
+
+```q
+`dispatchedtime xasc select taskid, tasktype, priority, submittedtime, dispatchedtime from tasks
+taskid tasktype priority submittedtime                 dispatchedtime               
+------------------------------------------------------------------------------------
+9      sumtil   9        2026.10.20D08:51:37.677650727 2026.10.20D08:51:37.678739277
+1      sleep    0        2026.10.20D08:51:35.673197691 2026.10.20D08:51:37.679028709
+2      sleep    0        2026.10.20D08:51:35.673400356 2026.10.20D08:51:37.679254365
+3      sleep    0        2026.10.20D08:51:35.673533294 2026.10.20D08:51:37.679470841
+4      sleep    0        2026.10.20D08:51:35.673653260 2026.10.20D08:51:38.696035079
+5      sumtil   0        2026.10.20D08:51:37.677263059 2026.10.20D08:51:38.696375433
+6      sumtil   0        2026.10.20D08:51:37.677406335 2026.10.20D08:51:38.696626593
+7      sumtil   0        2026.10.20D08:51:37.677493443 2026.10.20D08:51:38.696865825
+8      sumtil   0        2026.10.20D08:51:37.677572699 2026.10.20D08:51:42.995350280
+```
+
+
+
+# AI Usage
 1. qspec installation
 2. planning it out after i had an intial plan
     - was mostly good think it maybe went into too much detail for version 1
