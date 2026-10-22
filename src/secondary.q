@@ -10,6 +10,10 @@ system"l src/common/timer.q";
 system"l src/common/os.q";
 system"l src/approvedtasks.q";
 
+// if hdb set load it in
+if[count .primary.hdb:getenv `HDB_DIR;
+  system "l ",getenv `HDB_DIR;
+ ];
 
 // get the id form start cmd
 .secondary.opts: .Q.opt .z.x;

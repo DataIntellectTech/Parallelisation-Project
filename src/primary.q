@@ -241,7 +241,8 @@ system"l src/common/os.q";
 .primary.start:{
   if[.primary.spawnsecondaries; .primary.spawn each 1+til .primary.numsecondaries];
   .timer.addjob.custom[`stalecheck; {.primary.check[]}; (); 1; 2; ()!()];
-  .timer.addjob.custom[`dispatch; {.primary.dispatch[]}; (); 1; 2; ()!()];
+  //.timer.addjob.custom[`dispatch; {.primary.dispatch[]}; (); 1; 2; ()!()];
+  .timer.addjob.custom[`dispatch; {.primary.dispatch[]}; (); 0; 2; ()!()];
   .log.info "primary started, listening on ",string system "p";
   .primary.starttime:: .z.P;
  };

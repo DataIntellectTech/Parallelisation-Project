@@ -175,7 +175,121 @@ taskid tasktype priority submittedtime                 dispatchedtime
 8      sumtil   0        2026.10.20D08:51:37.677572699 2026.10.20D08:51:42.995350280
 ```
 
+# Benchmarking
+trades table is on avg 5100 rows per day
+## 1st run
+Pri/Sec side:
+1. we ran with 4 secondaries
+2. `.log.info` was running
+3. query was  
+```q
+alld:d where not null d:"D"$string key hsym `$getenv `HDB_DIR
+d:alld where alld within 2014.09.12 2015.09.11
+ids:.primary.newtask each ([] tasktype:(count d)#`vwap; args: d)
+```
+4. this took 1min 9secs (`0D00:01:09.599248039`)
+```q
+exec count i by state from tasks
+raze exec first each result from tasks where state=`done  //result
+exec (max finishedtime)-min startedtime from tasks
+```
+5. only difference is we dont get the result returned
+6. dispatch ran every 1 second 
 
+threads side:
+1. started `x hdb -s 4`
+2. ran much quicker
+```q
+rutledge@homer:~/internalWork$ x hdb/ -s 8
+KDB-X 5.0 2026.07.23 Copyright (C) 1993-2026 Kx Systems
+l64/ 64()core 385394MB jrutledge homer.aquaq.co.uk 127.0.1.1 EXPIRE 2027.03.26 dataintellect.com KXMS #104376
+
+.task.vwap:{[d]  select vwap: size wavg price by date,sym from trades where date = d };
+alld:d where not null d:"D"$string key hsym `$"/home/jrutledge/internalWork/hdb"
+d:alld where alld within 2014.09.12 2015.09.11
+startTime:.z.P; .task.vwap peach d ; .z.P-startTime
+0D00:00:00.077755113
+```
+
+I believe the main difference is the `dispatch` job only running every second, as the first task took ` 0D00:00:00.001581139`
+
+## 2nd run
+pri/sec:
+1. changed `dispatch` job to check every 0.01 seconds now
+2. this has sped it up significantly to 6.5 seconds `0D00:00:06.500832005`
+
+## 3rd run
+threads:
+1. startged with 8 threads
+```q
+rutledge@homer:~/internalWork$ x hdb/ -s 8
+KDB-X 5.0 2026.07.23 Copyright (C) 1993-2026 Kx Systems
+l64/ 64()core 385394MB jrutledge homer.aquaq.co.uk 127.0.1.1 EXPIRE 2027.03.26 dataintellect.com KXMS #104376
+
+.task.vwap:{[d]  select vwap: size wavg price by date,sym from trades where date = d };
+alld:d where not null d:"D"$string key hsym `$"/home/jrutledge/internalWork/hdb"
+d:alld where alld within 2014.09.12 2015.09.11
+startTime:.z.P; .task.vwap peach d ; .z.P-startTime
+0D00:00:00.089224031
+```
+
+pri/sec:
+1. Changed to run 8 secondary processes
+2. changed teh `dispatch` to check every 0.0001 seconds
+```q
+f:{alld:d where not null d:"D"$string key hsym `$getenv `HDB_DIR ; d:alld where alld within 2014.09.12 2015.09.11; ids:.primary.newtask each ([] tasktype:(count d)#`vwap; args: d)}
+f[]
+exec (max finishedtime)-min startedtime from tasks
+0D00:00:03.201173431
+```
+
+## 4th run
+lets up the amount of data, with fakedb.q we ran
+```q
+makehdb[`:hdb; 365; 100; 1000000]
+```
+
+threads:
+```q
+.task.vwap:{[d]  select vwap: size wavg price by date,sym from trades where date = d };
+alld:d where not null d:"D"$string key hsym `$"/home/jrutledge/internalWork/hdb"
+d:alld where alld within 2014.09.12 2015.09.11
+startTime:.z.P; .task.vwap peach d ; .z.P-startTime
+0D00:00:00.307302246
+```
+
+pri/sec:
+```q
+q)f:{alld:d where not null d:"D"$string key hsym `$getenv `HDB_DIR ; d:alld where alld within 2014.09.12 2015.09.11; ids:.primary.newtask each ([] tasktype:(count d)#`vwap; args: d)}
+
+exec (max finishedtime)-min startedtime from tasks
+0D00:00:03.225075485
+```
+
+## 5th run
+bump up the size of trades again
+```
+makehdb[`:hdb; 365; 100; 10000000]
+// i ctrl+c 'ed this as it was taking ages and homer was tight for disk space
+```
+will do a smaller date range as i dont want to kill homer
+
+threads (8)
+```q
+q).task.vwap:{[d]  select vwap: size wavg price by date,sym from trades where date = d };
+q)alld:d where not null d:"D"$string key hsym `$"/home/jrutledge/internalWork/hdb"
+q)startTime:.z.P; .task.vwap peach alld ; .z.P-startTime
+0D00:00:00.643
+```
+
+pri/sec:
+```q
+f:{alld:d where not null d:"D"$string key hsym `$getenv `HDB_DIR ;.primary.newtask each ([] tasktype:(count alld)#`vwap; args: alld)}
+f[]
+
+exec (max finishedtime)-min startedtime from tasks
+0D00:00:01.348516461
+```
 
 # AI Usage
 1. qspec installation

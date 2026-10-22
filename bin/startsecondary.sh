@@ -34,6 +34,9 @@ LOG="logs/sec$ID.$(date -u +%Y.%m.%dD%H.%M.%S).log"
 
 # nohup to run in bbackgorund if want to run interactively just use x src/primary.q
 nohup "$KDBX_HOME/bin/q" src/secondary.q -p "$PORT" -id "$ID" < /dev/null >> "$LOG" 2>&1 &
+# should we use secondaries
+#nohup "$KDBX_HOME/bin/q" src/secondary.q -p "$PORT" -id "$ID" -s 8 < /dev/null >> "$LOG" 2>&1 &
+
 
 echo $! > "logs/sec$ID.pid"
 echo "start secondary: id $ID, port $PORT, config $CONFIG, pid $!, log $LOG"
