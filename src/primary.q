@@ -28,6 +28,7 @@ system"l src/common/os.q";
 .primary.taskretries:"I"$getenv`TASK_RETRIES_MAX;
 .primary.tasktypes:`$"," vs getenv`TASK_TYPES;
 .primary.lasttaskid:0;
+.primary.retryreasons:`$"," vs getenv `RETRY_REASONS;
 
 
 
@@ -181,6 +182,7 @@ system"l src/common/os.q";
   if[newstate in `done`failed;
     sid:first exec secondaryid from tasks where taskid=tid;
     update status:`free, currenttask:0N from `secondaries where id=sid, currenttask=tid, status=`busy];
+  if[newstate=`failed; .primary.retry tid];
   1b
  };
 
@@ -202,17 +204,23 @@ system"l src/common/os.q";
 // hand a queued task to a secondary, do it by priority then by oldest first
 // will run on a timer every 1 sec
 .primary.dispatch:{
-  // check for free secondaries
   freesec: exec id from secondaries where status=`free;
-  // if none free exit
   if[not count freesec; :()];
-  // get queued tasks
   qtasks: exec taskid from `priority xdesc select taskid, priority from 0!tasks where state=`queued;
-  // if no tasks exit early
   n:min count[freesec], count qtasks;
   if[n=0; :()];
-  // get teh min of both tasks and free secs then run .primary.sendtask for each combo available
   .primary.sendtask'[n#freesec; n#qtasks];
+ };
+
+// rerun a failed task or one where a secondary has died
+.primary.retry:{[tid]
+  t:tasks tid;
+  if[not t[`reason] in .primary.retryreasons; :0b];
+  if[t[`retrycount]>=t`retriesmax;
+    .log.warn "task ",string[tid]," has used all ",string[t`retriesmax]," retries, leaving it failed";
+    :0b];
+  .log.info "retrying task ",string[tid],", retry ",string[1+t`retrycount]," of ",string t`retriesmax;
+  .primary.taskupdate[tid; `queued; ([retrycount:1i+t`retrycount; secondaryid:0N; dispatchedtime:0Np; startedtime:0Np; finishedtime:0Np; membefore:0N; memafter:0N; err:""; reason:`])];
  };
 
 // if a connection is close we need to mark it as closed
