@@ -19,6 +19,9 @@ if[not `primary in key `; system "l src/primary.q"];
 .ut.dptask:{[p] .primary.newtask `tasktype`args`priority!(`sumtil;100;p)};
 
 / the mocks shared by every test: quiet logs, a fixed task type list, and a runtask that records its calls
+/ the mocks shared by every test: quiet logs, a fixed task type list, a runtask that records its calls, and no retries
+/ uses .tst.mock[name;value] with brackets: the infix "mock" only exists while qspec runs a spec,
+/ so it can't be used in a helper defined out here at load time
 .ut.dpmocks:{[]
   .tst.mock[`.log.info; {[x] ::}];
   `.ut.dpwarns set 0;
@@ -26,6 +29,8 @@ if[not `primary in key `; system "l src/primary.q"];
   .tst.mock[`.primary.tasktypes; `sumtil`sleep`fail];
   `.ut.dpsent set ();
   .tst.mock[`.secondary.runtask; {[tid;tt;a] .ut.dpsent,:enlist (tid;tt;a); }];
+  / retries are tested in retry_spec.q, so a failed send stays failed here
+  .tst.mock[`.primary.retryreasons; `$()];
  };
 
 .tst.desc[".primary.dispatch - pairing"]{

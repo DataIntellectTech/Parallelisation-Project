@@ -291,6 +291,14 @@ exec (max finishedtime)-min startedtime from tasks
 0D00:00:01.348516461
 ```
 
+## change
+
+after we added the below line to `.primary.taskupdate` so it would rerun after a task is complete instead of waiting for  `.primary.dispatch` to run in our `.timer.getalljobs[]` table.
+```
+ if[newstate in `done`failed; .primary.dispatch[]];
+ ```
+ This got the time to 0.939 seconds (`0D00:00:00.939179837`) with the same setup as the 5th run
+
 # AI Usage
 1. qspec installation
 2. planning it out after i had an intial plan

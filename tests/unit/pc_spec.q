@@ -22,7 +22,7 @@ if[not `primary in key `; system "l src/primary.q"];
   tid
  };
 
-/ quiet logs (counting warnings), a fixed task type list, and a runtask that does nothing
+/ quiet logs (counting warnings), a fixed task type list, a runtask that does nothing, and no retries
 / uses .tst.mock[name;value]: the infix "mock" only exists inside .tst.desc
 .ut.pcmocks:{[]
   .tst.mock[`.log.info; {[x] ::}];
@@ -30,6 +30,8 @@ if[not `primary in key `; system "l src/primary.q"];
   .tst.mock[`.log.warn; {[x] .ut.pcwarns+:1}];
   .tst.mock[`.primary.tasktypes; `sumtil`sleep`fail];
   .tst.mock[`.secondary.runtask; {[tid;tt;a] ::}];
+  / retries are tested in retry_spec.q, so a failed task stays failed here
+  .tst.mock[`.primary.retryreasons; `$()];
  };
 
 .tst.desc[".z.pc - a secondary with a task"]{
@@ -93,7 +95,8 @@ if[not `primary in key `; system "l src/primary.q"];
     };
   should["not touch queued tasks"]{
     .ut.pcsend 1;
-    update handle:5i from `secondaries where id=2;
+    / secondary 2 busy on its own handle, so the dispatch after the failure has nowhere to send the queued task
+    update handle:5i, status:`busy from `secondaries where id=2;
     qt:.primary.newtask `tasktype`args!(`sleep;1);
     .z.pc 0i;
     `queued musteq tasks[qt]`state;

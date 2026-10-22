@@ -56,8 +56,12 @@ system"l src/common/os.q";
  };
 
 // to be called by each secondary except when its status is running, ran based off HEARTBEAT_MS
+// CLAUDE: a heartbeat only brings a stale secondary back: it must never free a busy one, a heartbeat sent just
+// before a task arrived can be processed after dispatch has marked it busy
+
 .primary.heartbeatcheck:{[mem]
-  update lastheartbeat:.z.P, lastmembytes: mem, status: `free from `secondaries where handle=.z.w;
+  update lastheartbeat:.z.P, lastmembytes: mem from `secondaries where handle=.z.w;
+  update status:`free from `secondaries where handle=.z.w, status=`stale;
  };
 
 // mark secondaries that arent sedning updates as stale
@@ -183,11 +187,13 @@ system"l src/common/os.q";
     sid:first exec secondaryid from tasks where taskid=tid;
     update status:`free, currenttask:0N from `secondaries where id=sid, currenttask=tid, status=`busy];
   if[newstate=`failed; .primary.retry tid];
+  if[newstate in `done`failed; .primary.dispatch[]];  // prevents us waiting on the timer, when bench marking this was the biggest thi
   1b
  };
 
 // sends the task to the secondary, if sending fails early exit and mark as stale
 .primary.sendtask:{[sid; tid]
+  if[not (`free~secondaries[sid]`status) and `queued~tasks[tid]`state; :()]; // double check if this is needed in testing remove it for a bit
   h:first exec handle from secondaries where id=sid;
   t:tasks tid;
   update status:`busy, currenttask:tid from `secondaries where id=sid;
@@ -241,8 +247,7 @@ system"l src/common/os.q";
 .primary.start:{
   if[.primary.spawnsecondaries; .primary.spawn each 1+til .primary.numsecondaries];
   .timer.addjob.custom[`stalecheck; {.primary.check[]}; (); 1; 2; ()!()];
-  //.timer.addjob.custom[`dispatch; {.primary.dispatch[]}; (); 1; 2; ()!()];
-  .timer.addjob.custom[`dispatch; {.primary.dispatch[]}; (); 0; 2; ()!()];
+  .timer.addjob.custom[`dispatch; {.primary.dispatch[]}; (); 1; 2; ()!()];
   .log.info "primary started, listening on ",string system "p";
   .primary.starttime:: .z.P;
  };
