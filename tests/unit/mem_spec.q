@@ -101,3 +101,28 @@ if[not `primary in key `; system "l src/primary.q"];
     1b musteq (r[`vmhwm]-r`vmrss)>50*1048576;
     };
  };
+
+
+.tst.desc[".mem.readandclear"]{
+  before{
+    `.log.warn mock {[x] ::};
+    };
+  should["return this process's figures as a dict"]{
+    r:.mem.readandclear[];
+    .z.i musteq r`pid;
+    1b musteq r[`rssanon]>0;
+    1b musteq r[`vmrss]>=r`rssanon;
+    };
+  should["reset vmhwm so the next reading is the peak since now"]{
+    a:til 10000000; a:0; .Q.gc[];
+    .mem.readandclear[];
+    r:first .mem.read enlist .z.i;
+    1b musteq (r[`vmhwm]-r`vmrss)<10*1048576;
+    };
+  should["record the peak of what ran after it"]{
+    .mem.readandclear[];
+    a:til 10000000; a:0; .Q.gc[];
+    r:first .mem.read enlist .z.i;
+    1b musteq (r[`vmhwm]-r`vmrss)>50*1048576;
+    };
+ };

@@ -31,8 +31,15 @@ system"l src/common/mem.q";
 .primary.lasttaskid:0;
 .primary.retryreasons:`$"," vs getenv `RETRY_REASONS;
 .primary.memhistorymax:"J"$getenv`MEM_HISTORY_MAX;
-.primary.selfmem:0N;         // the primary's own rssanon, bytes, from the last poll
-
+.primary.selfmem:0N;         // the primary's own rssanon, bytes, from the last poll  // these are Claudes
+.primary.memcap:"J"$getenv`GLOBAL_MEM_LIMIT;     // the global cap in bytes; null (unset or empty) = no cap
+.primary.paused:0b;          // is dispatch held back by the memory cap right now
+.primary.pausedsince:0Np;    // when the current pause started
+.primary.pausedtotal:0D;     // total time spent paused
+.primary.pausecount:0;       // how many times dispatch has paused
+.primary.respawnmax:"J"$getenv`RESPAWN_MAX;   // how many times a spawned secondary is restarted after dying; 0 or null = never
+.primary.respawns:(`long$())!`long$();        // restarts so far, by secondary id
+.primary.stopping:0b;                         // set while stopping, so secondaries exiting on purpose aren't restarted
 
 // dict of secondaries ids to their pids that the primary started
 .primary.spawned:(`long$())!`int$();
@@ -217,6 +224,8 @@ system"l src/common/mem.q";
   qtasks: exec taskid from `priority xdesc select taskid, priority from 0!tasks where state=`queued;
   n:min count[freesec], count qtasks;
   if[n=0; :()];
+  // the memory gate: send nothing new while total memory is over the cap
+  if[.primary.overcap[]; :()];
   .primary.sendtask'[n#freesec; n#qtasks];
  };
 
@@ -230,9 +239,6 @@ system"l src/common/mem.q";
   .log.info "retrying task ",string[tid],", retry ",string[1+t`retrycount]," of ",string t`retriesmax;
   .primary.taskupdate[tid; `queued; ([retrycount:1i+t`retrycount; secondaryid:0N; dispatchedtime:0Np; startedtime:0Np; finishedtime:0Np; membefore:0N; memafter:0N; err:""; reason:`])];
  };
-
-
-///
 
 // Claude with minor edits from me
 // read our own memory and every live secondary's from /proc in one call, store it, and add a history row
@@ -248,11 +254,50 @@ system"l src/common/mem.q";
   if[.primary.memhistorymax<n:count memhistory; delete from `memhistory where i<n-.primary.memhistorymax];
  };
 
+// claude minor edits
+// bytes as whole MB, for logs
+.primary.mb:{string[`long$x%1048576],"MB"};
+
+// claude minor edits
+// 1b if dispatch should hold back because total memory is over the cap; logs and times each pause and resume
+.primary.overcap:{
+  if[null .primary.memcap; :0b];
+  // the last poll can be up to a second old: if it says we're over, read again so a task that just finished counts
+  if[.primary.memcap<.primary.totalmem[]; .primary.pollmem[]];
+  tot:.primary.totalmem[];
+  overcap:tot>.primary.memcap;
+  if[overcap and not .primary.paused;
+    .primary.paused:1b; .primary.pausedsince:.z.P; .primary.pausecount+:1;
+    .log.warn "pausing dispatch: memory ",.primary.mb[tot]," is over the cap of ",.primary.mb .primary.memcap];
+  if[.primary.paused and not overcap;
+    .primary.paused:0b; .primary.pausedtotal+:.z.P-.primary.pausedsince;
+    .log.info "resuming dispatch: memory ",.primary.mb[tot]," is under the cap of ",.primary.mb[.primary.memcap],", was paused for ",string .z.P-.primary.pausedsince];
+  overcap
+ };
+
 // Claude with minor edits from me
 // total memory in use: the primary plus every live secondary, from the last poll, in bytes
 .primary.totalmem:{ .primary.selfmem + exec sum rssanon from secondaries where status<>`closed};
 
-///
+// claude
+// fail tasks that have run past their timeout. A busy secondary can't be interrupted, so its process is killed.
+// Counts from startedtime, or dispatchedtime if the secondary never reported running
+.primary.checktimeouts:{
+  late:0!select taskid, secondaryid, timeout from tasks where state in `dispatched`running, .z.P>timeout + dispatchedtime^startedtime;
+  if[not count late; :()];
+  .primary.timeout'[late`taskid; late`secondaryid; late`timeout];
+ };
+
+//claude minor edits
+// time out one task: take its secondary out of use and fail the task first, then kill the process.
+// .z.pc fires once the process is dead, finds no task to fail as lost, and respawns the secondary
+.primary.timeout:{[tid;sid;t]
+  pid:select pid from secondaries where id=sid;
+  .log.warn "task ",string[tid]," on secondary ",string[sid]," has run past its timeout of ",string[t],", killing pid ",string pid;
+  update status:`closed, currenttask:0N from `secondaries where id=sid;
+  .primary.taskupdate[tid; `failed; ([err:"timed out after ",string t; reason:`timeout])];
+  @[.os.kill9; pid; {[e] .log.warn "could not kill secondary: ",e}];
+ };
 
 // if a connection is close we need to mark it as closed
 .z.pc:{[h]

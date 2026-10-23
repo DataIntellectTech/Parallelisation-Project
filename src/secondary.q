@@ -61,12 +61,12 @@ if[count .primary.hdb:getenv `HDB_DIR;
 // sec tells pri it is starting, record mem before, run task, record mem after result, .Q.gc[],  send result
 .secondary.runtask:{[tid; tasktype; args]
   .secondary.send (`.primary.taskupdate; tid; `running; ()!());
-  membefore:.Q.w[]`heap;   // went with heap here as it might not register if its a small task on used
+  membefore:.mem.readandclear[]`rssanon;    // better than using .Q.w[]`heap
   if[not tasktype in at:key .secondary.approvedtasks;
     .log.warn "the task ",string[tasktype]," is not in the approved tasks list. Approved tasks are: ",", " sv string at;
     :.secondary.send (`.primary.taskupdate; tid; `failed; `err`reason`membefore`memafter!("unknown tasktype: ",string tasktype; `error; membefore; membefore))];
   res:@[{.secondary.approvedtasks[x] y}[tasktype;]; args; {[error] (`failure; error)}];
-  memafter:.Q.w[]`heap;
+  memafter:first exec vmhwm from .mem.read enlist .z.i;
   .Q.gc[];
   if[`failure ~ first res; 
     .log.warn "task ",string[tid],", failed with error: ",last res;

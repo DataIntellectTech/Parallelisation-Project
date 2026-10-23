@@ -348,3 +348,68 @@ We can see the kernal mem stats at `/proc/<pid>/status` file
 **RssFile**: RAM holding file page eg. q binary, libs and mapped files. The kernal can drop and read it from disk again so it is not a real cost. This is different to `mmap` in q as this is only files q mapped where as `RssFile` has the binarys and libs.
 
 **VmHWM**: The largest `VmRSS` has been since the process has started or the last reset. (this can be done by writing `5` to `/pric/<pid>/clear_refs`)
+
+Too test `OOM` i might need to use `cgroups` this allows me to allocate a certain amount of RAM to my processes so they will be chosen to kill first if mem limits are reached
+
+Claude steps
+
+## Testing out-of-memory safely on homer (cgroups)
+
+homer is shared, so anything that might run out of memory runs inside a **cgroup** with its own memory limit. When the limit is reached, the kernel kills a process **inside the cgroup** (a secondary, as they set `oom_score_adj=1000`) and nothing outside it is affected. Always use `MemorySwapMax=0`: homer already uses a lot of swap, and without it a cgroup at its limit would swap instead of being killed.
+
+`systemd-run` doesn't know shell aliases, so use the full path to q (`$KDBX_HOME/bin/q`), not `x`.
+
+### 1. Check homer supports it (read-only)
+
+```bash
+stat -fc %T /sys/fs/cgroup                    # cgroup2fs
+systemctl --user is-system-running            # running (or degraded)
+cat /sys/fs/cgroup/user.slice/user-$(id -u).slice/user@$(id -u).service/cgroup.controllers   # must include memory
+free -g                                       # plenty free
+```
+
+### 2. Check a limit is applied (harmless)
+
+```bash
+systemd-run --user --scope --unit=qfwtest -p MemoryMax=200M -p MemorySwapMax=0 sleep 60 &
+sleep 1
+systemctl --user status qfwtest.scope | head -5      # active (running)
+cat /sys/fs/cgroup/user.slice/user-$(id -u).slice/user@$(id -u).service/app.slice/qfwtest.scope/memory.max   # 209715200
+kill %1
+```
+
+If the `memory.max` path doesn't exist: `systemctl --user show qfwtest.scope -p ControlGroup` gives the path under `/sys/fs/cgroup`.
+
+### 3. Check the kernel kills a process at its limit
+
+```bash
+echo 'a:til 50000000' | systemd-run --user --scope --unit=qfwoom -p MemoryMax=200M -p MemorySwapMax=0 $KDBX_HOME/bin/q -q
+echo "exit code: $?"                                  # 137 = killed by the OOM killer
+journalctl --user -n 20 --no-pager | grep -i -E "oom|qfwoom"
+```
+
+**Expected:** `Killed`, exit code `137`, and a journal line saying a process in `qfwoom.scope` was killed by the OOM killer.
+
+### 4. Run the framework inside a cgroup
+
+```bash
+cd ~/internalWork/Parallelisation-Project
+set -a; source config/default.env; set +a
+systemd-run --user --scope --unit=qfw -p MemoryMax=4G -p MemorySwapMax=0 $KDBX_HOME/bin/q src/primary.q -p 45000
+```
+
+The primary and every secondary it spawns share the 4GB hard limit. Check the secondaries are inside it:
+
+```q
+q)system "cat /proc/",string[.z.i],"/cgroup"                                    / ends in qfw.scope
+q)system "cat /proc/",string[first exec pid from secondaries],"/cgroup"         / the same
+```
+
+Keep `MemoryMax` (the kernel's hard limit) at or above `GLOBAL_MEM_LIMIT` (the framework's soft cap), so dispatch pauses before the kernel has to kill anything.
+
+### Clean up
+
+```bash
+systemctl --user list-units --type=scope | grep qfw            # anything still running
+systemctl --user stop qfw.scope                                 # stop one by name
+```

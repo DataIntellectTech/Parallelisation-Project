@@ -64,4 +64,12 @@ system "l tests/helpers/it.q";
     "unknown tasktype: rm" mustmatch .it.task[tid]`err;
     1b musteq .it.waitfor[{`free~.it.status 2};5];
     };
+  should["record the task's real peak memory, not q's rounded heap"]{
+    tid:.it.dispatch[1;`hold;`hold;`mb`secs!(300;1)];
+    1b musteq .it.waitstate[tid;`done;10];
+    t:.it.task tid;
+    / a 300MB task: peak about 300MB plus q itself (~7MB); the old heap figure would have been 512MB
+    1b musteq (t[`memafter]%1048576) within 300 340;
+    1b musteq t[`membefore]<50*1048576;
+   };
  };
