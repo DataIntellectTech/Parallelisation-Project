@@ -336,3 +336,15 @@ sec1:hopen `::45001
 ```
 ### create an images folder or stick them all under docs/images and look at referncing them better
 ![alt text](image.png)
+
+
+## info on kernal memory
+We can see the kernal mem stats at `/proc/<pid>/status` file
+
+**VmRSS**: Resident memory, this is all the physical RAM a process occupies. Its is roughly `RssAnon + RssFile`.
+
+**RssAnon**: RAM not backed by a file. For q essentially the heap pages actually in use. The kernal cannot drop it so its the memory that leads to swapping or the OOM killer. In q the `heap` is what has been promised and available but `RssAnon` is what the kernal has promised, so usually the `heap > RssAnon`.
+
+**RssFile**: RAM holding file page eg. q binary, libs and mapped files. The kernal can drop and read it from disk again so it is not a real cost. This is different to `mmap` in q as this is only files q mapped where as `RssFile` has the binarys and libs.
+
+**VmHWM**: The largest `VmRSS` has been since the process has started or the last reset. (this can be done by writing `5` to `/pric/<pid>/clear_refs`)

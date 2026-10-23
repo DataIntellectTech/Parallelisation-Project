@@ -9,6 +9,7 @@ system"l src/common/log.q";
 system"l src/common/timer.q";
 system"l src/common/os.q";
 system"l src/approvedtasks.q";
+system"l src/common/mem.q";
 
 // if hdb set load it in
 if[count .primary.hdb:getenv `HDB_DIR;

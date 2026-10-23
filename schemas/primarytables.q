@@ -15,7 +15,10 @@ secondaries : ([id: `long$()]
   starttime:        `timestamp$();
   registeredtime:   `timestamp$();
   tasktypes:        ();
-  currenttask:      `long$()
+  currenttask:      `long$();
+  rssanon:          `long$();       // in bytes
+  vmrss:            `long$();       // in bytes
+  memtime:          `timestamp$()
  );
 
 // monitor the tasks that are being carried out
@@ -38,4 +41,13 @@ tasks : ([taskid: `long$()]
   err:            (); 
   reason:         `$();            // `timeout`unknown`oom
   result:         ()
+ );
+
+// one row per memory poll, bounded to the last .primary.memhistorymax rows
+memhistory:([] 
+  time:         `timestamp$();
+  total:        `long$();
+  primary:      `long$();
+  secondaries:  `long$();
+  busy:         `int$()
  );

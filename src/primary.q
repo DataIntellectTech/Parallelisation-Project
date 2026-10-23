@@ -11,6 +11,7 @@ system"l schemas/primarytables.q";
 system"l src/common/log.q";
 system"l src/common/timer.q";
 system"l src/common/os.q";
+system"l src/common/mem.q";
 
 // get env vars
 .primary.stale:00:00:00.001*"J"$getenv`STALE_MS;
@@ -29,7 +30,8 @@ system"l src/common/os.q";
 .primary.tasktypes:`$"," vs getenv`TASK_TYPES;
 .primary.lasttaskid:0;
 .primary.retryreasons:`$"," vs getenv `RETRY_REASONS;
-
+.primary.memhistorymax:"J"$getenv`MEM_HISTORY_MAX;
+.primary.selfmem:0N;         // the primary's own rssanon, bytes, from the last poll
 
 
 // dict of secondaries ids to their pids that the primary started
@@ -51,7 +53,7 @@ system"l src/common/os.q";
 // example run:
 // .primary.register ([id:5; pid:4000i; host:`localhost; port:45001i ])
 .primary.register:{[info]
-  `secondaries upsert (info`id; .z.w; info`pid; info`host; info`port; `free; .z.P; 0N; 0Ni; 1b; info[`id] in key .primary.spawned; .z.P; .z.P; (); 0N);
+  `secondaries upsert (info`id; .z.w; info`pid; info`host; info`port; `free; .z.P; 0N; 0Ni; 1b; info[`id] in key .primary.spawned; .z.P; .z.P; (); 0N; 0N; 0N; 0Np);
   .log.info "secondary ", string[info`id], " registered at: ", string .z.P;
  };
 
@@ -229,6 +231,29 @@ system"l src/common/os.q";
   .primary.taskupdate[tid; `queued; ([retrycount:1i+t`retrycount; secondaryid:0N; dispatchedtime:0Np; startedtime:0Np; finishedtime:0Np; membefore:0N; memafter:0N; err:""; reason:`])];
  };
 
+
+///
+
+// Claude with minor edits from me
+// read our own memory and every live secondary's from /proc in one call, store it, and add a history row
+// works for busy secondaries too: nothing is asked of them. A pid that has gone gets nulls until .z.pc closes it
+.primary.pollmem:{
+  m:.mem.read .z.i, exec pid from secondaries where status<>`closed;
+  .primary.selfmem:first exec rssanon from m where pid=.z.i;
+  ra:exec pid!rssanon from m;
+  rs:exec pid!vmrss from m;
+  update rssanon:ra pid, vmrss:rs pid, memtime:.z.P from `secondaries where status<>`closed;
+  sec:exec sum rssanon from secondaries where status<>`closed;
+  `memhistory insert (.z.P; .primary.selfmem+sec; .primary.selfmem; sec; exec `int$count i from secondaries where status=`busy);
+  if[.primary.memhistorymax<n:count memhistory; delete from `memhistory where i<n-.primary.memhistorymax];
+ };
+
+// Claude with minor edits from me
+// total memory in use: the primary plus every live secondary, from the last poll, in bytes
+.primary.totalmem:{ .primary.selfmem + exec sum rssanon from secondaries where status<>`closed};
+
+///
+
 // if a connection is close we need to mark it as closed
 .z.pc:{[h]
   secid: first exec id from secondaries where handle=h;
@@ -248,6 +273,7 @@ system"l src/common/os.q";
   if[.primary.spawnsecondaries; .primary.spawn each 1+til .primary.numsecondaries];
   .timer.addjob.custom[`stalecheck; {.primary.check[]}; (); 1; 2; ()!()];
   .timer.addjob.custom[`dispatch; {.primary.dispatch[]}; (); 1; 2; ()!()];
+  .timer.addjob.custom[`mempoll; {.primary.pollmem[]}; (); 1; 2; ()!()];
   .log.info "primary started, listening on ",string system "p";
   .primary.starttime:: .z.P;
  };

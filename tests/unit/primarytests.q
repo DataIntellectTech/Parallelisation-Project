@@ -11,17 +11,21 @@ if[not `primary in key `; system "l src/primary.q"];
  };
 
 .tst.desc["check table schemas"]{
-  should["return 2 tables"]{
-    2 musteq count tables[];
+  should["return 3 tables"]{
+    3 musteq count tables[];
     system "l schemas/primarytables.q";
    };
   should["have the correct schema for secondaries table"]{
-    (`id`handle`pid`host`port`status`lastheartbeat`lastmembytes`consecutivefails`healthy`spawned`starttime`registeredtime`tasktypes`currenttask) mustmatch cols secondaries;
-    "jiisispjibbpp j" mustmatch exec t from meta secondaries;
+     (`id`handle`pid`host`port`status`lastheartbeat`lastmembytes`consecutivefails`healthy`spawned`starttime`registeredtime`tasktypes`currenttask`rssanon`vmrss`memtime) mustmatch cols secondaries;
+    "jiisispjibbpp jjjp" mustmatch exec t from meta secondaries;
    };
   should["have the correct schema for the tasks table"]{
     (`taskid`tasktype`args`priority`submittedtime`memestimate`timeout`retriesmax`retrycount`state`secondaryid`dispatchedtime`startedtime`finishedtime`membefore`memafter`err`reason`result) mustmatch cols tasks;
     "js ipjtiisjpppjj s " mustmatch exec t from meta tasks;
+   };
+  should["have the correct schema for memhistory table"]{
+    (`time`total`primary`secondaries`busy) mustmatch cols memhistory;
+    "pjjji" mustmatch exec t from meta memhistory;
    };
  };
 
