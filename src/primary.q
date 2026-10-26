@@ -38,8 +38,7 @@ system"l src/common/mem.q";
 .primary.pausedtotal:0D;     // total time spent paused
 .primary.pausecount:0;       // how many times dispatch has paused
 .primary.respawnmax:"J"$getenv`RESPAWN_MAX;   // how many times a spawned secondary is restarted after dying; 0 or null = never
-.primary.respawns:(`long$())!`long$();        // restarts so far, by secondary id
-.primary.stopping:0b;                         // set while stopping, so secondaries exiting on purpose aren't restarted
+
 
 // dict of secondaries ids to their pids that the primary started
 .primary.spawned:(`long$())!`int$();
@@ -53,7 +52,8 @@ system"l src/common/mem.q";
 // the time column that gets updated at each task status
 .primary.statustime:([dispatched: `dispatchedtime; running: `startedtime; done: `finishedtime; failed: `finishedtime]);
 
-
+// restarts so far, by secondary id
+.primary.respawns:(`long$())!`long$();
 
 
 // when a secondary starts add it to the secondaries table
@@ -292,14 +292,27 @@ system"l src/common/mem.q";
 // time out one task: take its secondary out of use and fail the task first, then kill the process.
 // .z.pc fires once the process is dead, finds no task to fail as lost, and respawns the secondary
 .primary.timeout:{[tid;sid;t]
-  pid:select pid from secondaries where id=sid;
+  pid:first exec pid from secondaries where id=sid;
   .log.warn "task ",string[tid]," on secondary ",string[sid]," has run past its timeout of ",string[t],", killing pid ",string pid;
   update status:`closed, currenttask:0N from `secondaries where id=sid;
   .primary.taskupdate[tid; `failed; ([err:"timed out after ",string t; reason:`timeout])];
   @[.os.kill9; pid; {[e] .log.warn "could not kill secondary: ",e}];
  };
 
+// restart a spawned secondary that has died capped with .primary.respawnsmax
+.primary.respawnsecondary:{[sid]
+  if[not sid in key .primary.spawned; :()];
+  n:0^.primary.respawns sid;
+  if[not n < .primary.respawnmax;
+    .log.warn "secondary ",string[sid]," has been restarted ",string[n]," times already, max secondary restarts is ",string .primary.respawnmax;
+    :()];
+  .primary.respawns[sid]:n+1;
+  .log.info "restarting secondary ",string[sid],", restart ",string[n+1]," of ",string .primary.respawnmax;
+  .primary.spawn sid;
+ };
+
 // if a connection is close we need to mark it as closed
+// we will now restart a secondary if it is closed and under .primary.respawnsmax
 .z.pc:{[h]
   secid: first exec id from secondaries where handle=h;
   tid: first exec currenttask from secondaries where id=secid;
@@ -308,6 +321,7 @@ system"l src/common/mem.q";
   if[not null tid;
     .primary.taskupdate[tid; `failed; ([err:"secondary lost"; reason:`lost])];
     .log.warn "task ",string[tid]," was on secondary ",string[secid],", marking it as failed"];
+  .primary.respawnsecondary secid;
  };
 
 // quitting the primary kills any spawned secondaries
@@ -319,6 +333,7 @@ system"l src/common/mem.q";
   .timer.addjob.custom[`stalecheck; {.primary.check[]}; (); 1; 2; ()!()];
   .timer.addjob.custom[`dispatch; {.primary.dispatch[]}; (); 1; 2; ()!()];
   .timer.addjob.custom[`mempoll; {.primary.pollmem[]}; (); 1; 2; ()!()];
+  .timer.addjob.custom[`timeoutcheck; {.primary.checktimeouts[]}; (); 1; 2; ()!()];
   .log.info "primary started, listening on ",string system "p";
   .primary.starttime:: .z.P;
  };
