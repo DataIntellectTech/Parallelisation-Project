@@ -33,7 +33,7 @@ system"l src/common/mem.q";
 .primary.memhistorymax:"J"$getenv`MEM_HISTORY_MAX;
 .primary.selfmem:0N;         // the primary's own rssanon, bytes, from the last poll  // these are Claudes
 .primary.memcap:"J"$getenv`GLOBAL_MEM_LIMIT;     // the global cap in bytes; null (unset or empty) = no cap
-.primary.paused:0b;          // is dispatch held back by the memory cap right now
+.primary.paused:0b;          // is dispatching new tasks held back by the mem cap
 .primary.pausedsince:0Np;    // when the current pause started
 .primary.pausedtotal:0D;     // total time spent paused
 .primary.pausecount:0;       // how many times dispatch has paused
@@ -87,9 +87,14 @@ system"l src/common/mem.q";
 .primary.countby:{[states;statuscol] states!sum each statuscol=/:states};
 
 // a snapshot of the primarys status
+// memory is in bytes headroom how far under the cap we are
 .primary.status:{
-  secs:select id, pid, port, status, spawned, lastseen:`time$.z.P-lastheartbeat,lastmembytes from 0!secondaries;
-  ([time: .z.P; uptime: .z.P-.primary.starttime; secondaries: secs; seccounts: .primary.countby[.primary.secondarystates;exec status from secondaries]; taskcounts: .primary.countby[.primary.taskstates;exec state from tasks]])
+  secs:select id, pid, port, status, spawned, currenttask, rssanon, restarts:0^.primary.respawns id, lastseen:.z.P-lastheartbeat, lastmembytes from 0!secondaries;
+  tot:.primary.totalmem[];
+  mem:([total:tot; cap:.primary.memcap; headroom:.primary.memcap-tot; primary:.primary.selfmem]);
+  pt:.primary.pausedtotal+$[.primary.paused; .z.P-.primary.pausedsince; 0D];
+  disp:([paused:.primary.paused; pausecount:.primary.pausecount; pausedtotal:pt; pausedsince:.primary.pausedsince]);
+  ([time: .z.P; uptime: .z.P - .primary.starttime; memory: mem; dispatch: disp; secondaries: secs; seccounts: .primary.countby[.primary.secondarystates;exec status from secondaries]; taskcounts: .primary.countby[.primary.taskstates;exec state from tasks]])
  };
 
 // the same snapshot, printed for a person at the console
@@ -277,7 +282,7 @@ system"l src/common/mem.q";
 
 // Claude with minor edits from me
 // total memory in use: the primary plus every live secondary, from the last poll, in bytes
-.primary.totalmem:{ .primary.selfmem + exec sum rssanon from secondaries where status<>`closed};
+.primary.totalmem:{.primary.selfmem + exec sum rssanon from secondaries where status<>`closed};
 
 // claude
 // fail tasks that have run past their timeout. A busy secondary can't be interrupted, so its process is killed.

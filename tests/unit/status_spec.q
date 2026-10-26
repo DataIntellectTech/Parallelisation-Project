@@ -42,7 +42,7 @@
   should["have the correct keys"]{
     s:.primary.status[];
     99h musteq type s;
-    `time`uptime`secondaries`seccounts`taskcounts mustmatch key s;
+    `time`uptime`memory`dispatch`secondaries`seccounts`taskcounts mustmatch key s;
    };
   should["work with no secondaries and no tasks"]{
     s:.primary.status[];
@@ -65,7 +65,7 @@
     .ut.reg each 1 2;
     t:.primary.status[]`secondaries;
     2 musteq count t;
-    `id`pid`port`status`spawned`lastseen`lastmembytes mustmatch cols t;
+    `id`pid`port`status`spawned`currenttask`rssanon`restarts`lastseen`lastmembytes mustmatch cols t;
    };
   should["show a just-registered secondary as seen moments ago"]{
     .ut.reg 1;
