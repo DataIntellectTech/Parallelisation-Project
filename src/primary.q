@@ -12,6 +12,7 @@ system"l src/common/log.q";
 system"l src/common/timer.q";
 system"l src/common/os.q";
 system"l src/common/mem.q";
+system"l src/common/cgroup.q";
 
 // get env vars
 .primary.stale:00:00:00.001*"J"$getenv`STALE_MS;
@@ -320,16 +321,29 @@ system"l src/common/mem.q";
   .primary.spawn sid;
  };
 
+// 1b if the kernel has killed a process in our cgroup for memory since we last checked, and count that kill as accounted for
+// the kernel counts the kill before the connection close reaches us, so this is called from .z.pc
+.primary.oomkilled:{
+  n:.cgroup.oomkills .primary.cgroupdir;
+  if[null n; :0b];
+  if[n<=.primary.oomkills; :0b];
+  .primary.oomkills+:1;
+  1b
+ };
+
 // if a connection is close we need to mark it as closed
 // we will now restart a secondary if it is closed and under .primary.respawnsmax
 .z.pc:{[h]
   secid: first exec id from secondaries where handle=h;
   tid: first exec currenttask from secondaries where id=secid;
   update status:`closed, handle:0Ni, currenttask: 0N from `secondaries where id=secid;
-  .log.info "secondary ",string[secid]," has closed its connection to the primary";
+  // was it killed by the kernel for memory? only check for secondaries, so other connections closing don't use up a kill
+  oom:$[null secid; 0b; .primary.oomkilled[]];
+  .log.info "secondary ",string[secid]," has closed its connection to the primary",$[oom; ": killed by the kernel for using too much memory"; ""];
   if[not null tid;
-    .primary.taskupdate[tid; `failed; ([err:"secondary lost"; reason:`lost])];
-    .log.warn "task ",string[tid]," was on secondary ",string[secid],", marking it as failed"];
+    r:$[oom; ([err:"secondary killed by the kernel for using too much memory"; reason:`oom]); ([err:"secondary lost"; reason:`lost])];
+    .primary.taskupdate[tid; `failed; r];
+    .log.warn "task ",string[tid]," was on secondary ",string[secid],", marking it as failed (",string[r`reason],")"];
   .primary.respawnsecondary secid;
  };
 
@@ -343,6 +357,8 @@ system"l src/common/mem.q";
   .timer.addjob.custom[`dispatch; {.primary.dispatch[]}; (); 1; 2; ()!()];
   .timer.addjob.custom[`mempoll; {.primary.pollmem[]}; (); 1; 2; ()!()];
   .timer.addjob.custom[`timeoutcheck; {.primary.checktimeouts[]}; (); 1; 2; ()!()];
+  .primary.cgroupdir:.cgroup.dir[];
+  .primary.oomkills:.cgroup.oomkills .primary.cgroupdir;
   .log.info "primary started, listening on ",string system "p";
   .primary.starttime:: .z.P;
  };

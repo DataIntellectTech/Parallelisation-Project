@@ -355,61 +355,65 @@ Claude steps
 
 ## Testing out-of-memory safely on homer (cgroups)
 
-homer is shared, so anything that might run out of memory runs inside a **cgroup** with its own memory limit. When the limit is reached, the kernel kills a process **inside the cgroup** (a secondary, as they set `oom_score_adj=1000`) and nothing outside it is affected. Always use `MemorySwapMax=0`: homer already uses a lot of swap, and without it a cgroup at its limit would swap instead of being killed.
+homer is shared, so anything that might run out of memory runs inside a **cgroup (control group)** with its own memory limit. When the limit is reached, the kernel kills a process **inside the cgroup** (a secondary, as they set `oom_score_adj=1000`) and nothing outside it is affected. Always use `MemorySwapMax=0`: homer already uses a lot of swap, and without it a cgroup at its limit would swap instead of being killed.
 
 `systemd-run` doesn't know shell aliases, so use the full path to q (`$KDBX_HOME/bin/q`), not `x`.
 
-### 1. Check homer supports it (read-only)
+To do this we edit the file `/proc/<pid>/cgroup` by changing the start to use `/sys/fs/cgroup`. This can be seen in the function `.cgroup.dir`.
 
+In the files under our cgroup directory we have the following;
 ```bash
-stat -fc %T /sys/fs/cgroup                    # cgroup2fs
-systemctl --user is-system-running            # running (or degraded)
-cat /sys/fs/cgroup/user.slice/user-$(id -u).slice/user@$(id -u).service/cgroup.controllers   # must include memory
-free -g                                       # plenty free
+d=<cgroup_dir>
+cat $d/memory.current      # bytes the whole cgroup is using right now (all its processes together)
+cat $d/memory.max          # the limit: "max" means no limit
+cat $d/memory.events       # counters: how often the limit was hit, and oom_kill
+cat $d/cgroup.procs        # the pids in this cgroup
 ```
 
-### 2. Check a limit is applied (harmless)
+So we will edit the `memory.max` file, so every process started in the same cgroup will be subjected to this. Since we start the secondary processes from the primary they will be under the same cgroup. When `memory.current` reaches `memory.max` the kernal will look at which processes have the highest `oom_score` and kill them first. As we start all secondary processes with an `oom_score_adj`=1000 it kills secondary processes first. It will add 1 to `oom_kill` in that cgroups `memory.events`
 
+### How does it decide which process to kill?
+
+How bad a process is can be calculated
 ```bash
-systemd-run --user --scope --unit=qfwtest -p MemoryMax=200M -p MemorySwapMax=0 sleep 60 &
-sleep 1
-systemctl --user status qfwtest.scope | head -5      # active (running)
-cat /sys/fs/cgroup/user.slice/user-$(id -u).slice/user@$(id -u).service/app.slice/qfwtest.scope/memory.max   # 209715200
-kill %1
+badness = the process's resident memory + its swap + its page tables      (in pages)
+        + oom_score_adj × (total memory allowed ÷ 1000)
 ```
 
-If the `memory.max` path doesn't exist: `systemctl --user show qfwtest.scope -p ControlGroup` gives the path under `/sys/fs/cgroup`.
+Which ever process has the highest `badness` will be killed first by the kernal.
 
-### 3. Check the kernel kills a process at its limit
-
-```bash
-echo 'a:til 50000000' | systemd-run --user --scope --unit=qfwoom -p MemoryMax=200M -p MemorySwapMax=0 $KDBX_HOME/bin/q -q
-echo "exit code: $?"                                  # 137 = killed by the OOM killer
-journalctl --user -n 20 --no-pager | grep -i -E "oom|qfwoom"
-```
-
-**Expected:** `Killed`, exit code `137`, and a journal line saying a process in `qfwoom.scope` was killed by the OOM killer.
-
-### 4. Run the framework inside a cgroup
+### How to start the primary in a cgroup
 
 ```bash
 cd ~/internalWork/Parallelisation-Project
 set -a; source config/default.env; set +a
-systemd-run --user --scope --unit=qfw -p MemoryMax=4G -p MemorySwapMax=0 $KDBX_HOME/bin/q src/primary.q -p 45000
+systemd-run --user --scope --unit=qfwoom -p MemoryMax=1G -p MemorySwapMax=0 $KDBX_HOME/bin/q src/primary.q -p 45000
 ```
 
-The primary and every secondary it spawns share the 4GB hard limit. Check the secondaries are inside it:
+### What the primary does when a secondary is killed for memory
 
-```q
-q)system "cat /proc/",string[.z.i],"/cgroup"                                    / ends in qfw.scope
-q)system "cat /proc/",string[first exec pid from secondaries],"/cgroup"         / the same
-```
+At start the primary finds its cgroup (`/proc/<pid>/cgroup`) and remembers the
+`oom_kill` count from that cgroup's `memory.events`. When a secondary's connection
+closes, the primary reads the count again. If it has gone up, the secondary was
+killed by the kernel: its task is marked `failed` with reason `oom` and is **not**
+retried (`oom` is not in `RETRY_REASONS`), because it would only be killed again.
+Otherwise the reason is `lost` and the task is retried as usual. Either way the
+secondary is restarted (up to `RESPAWN_MAX`).
 
-Keep `MemoryMax` (the kernel's hard limit) at or above `GLOBAL_MEM_LIMIT` (the framework's soft cap), so dispatch pauses before the kernel has to kill anything.
+Outside a memory-limited cgroup the count stays 0, so every death is `lost`.
 
-### Clean up
+To see it happen:
 
 ```bash
-systemctl --user list-units --type=scope | grep qfw            # anything still running
-systemctl --user stop qfw.scope                                 # stop one by name
+set -a; source config/default.env; set +a
+systemd-run --user --scope --unit=qfwoom -p MemoryMax=1G -p MemorySwapMax=0 $KDBX_HOME/bin/q src/primary.q -p 45000
 ```
+```q
+q)t:.primary.newtask `tasktype`args!(`hold;`mb`secs!(1500;10))
+q)tasks[t]`state`reason`retrycount        / `failed`oom, 0i
+q)system "cat ",.primary.cgroupdir,"/memory.events"   / oom_kill 1
+q).primary.showstatus[]                   / that secondary is back, restarts 1
+```
+Always set `MemorySwapMax=0`: without it the kernel swaps the process instead of
+killing it, and homer already uses a lot of swap.
+
