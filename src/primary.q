@@ -89,7 +89,7 @@ system"l src/common/mem.q";
 // a snapshot of the primarys status
 // memory is in bytes headroom how far under the cap we are
 .primary.status:{
-  secs:select id, pid, port, status, spawned, currenttask, rssanon, restarts:0^.primary.respawns id, lastseen:.z.P-lastheartbeat, lastmembytes from 0!secondaries;
+  secs:select id, pid, port, status, spawned, currenttask, rssanon, restarts:0^.primary.respawns id, lastseen:`time$.z.P-lastheartbeat, lastmembytes from 0!secondaries;
   tot:.primary.totalmem[];
   mem:([total:tot; cap:.primary.memcap; headroom:.primary.memcap-tot; primary:.primary.selfmem]);
   pt:.primary.pausedtotal+$[.primary.paused; .z.P-.primary.pausedsince; 0D];
@@ -102,8 +102,12 @@ system"l src/common/mem.q";
   pristatus:.primary.status[];
   fmt:{[d] ", " sv {[d;k] string[d k]," ",string k}[d] each key d};
   -1 "== primary status ",string[pristatus`time],"  uptime ",string[pristatus`uptime]," ==";
+  m:pristatus`memory;
+  -1 "memory: ",.primary.mb[m`total]," in use, ",$[null m`cap; "no cap"; .primary.mb[m`cap]," cap, ",.primary.mb[m`headroom]," headroom"];
+  d:pristatus`dispatch;
+  -1 "dispatch: ",$[d`paused; "PAUSED (memory over the cap) since ",string d`pausedsince; "running"],", paused ",string[d`pausecount]," times for ",string d`pausedtotal;
   -1 "secondaries: ",fmt pristatus`seccounts;
-  show pristatus`secondaries;
+  show `id xasc select id, pid, port, status, spawned, task:currenttask, memmb:0.1*floor 0.5+10*rssanon%1048576, restarts, lastseen from pristatus`secondaries;
   -1 "tasks: ",fmt pristatus`taskcounts;
  };
 

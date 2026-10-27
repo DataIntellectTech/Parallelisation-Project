@@ -86,3 +86,75 @@
     t0 mustmatch secondaries;
    };
  };
+
+.tst.desc[".primary.status - memory, dispatch and the new secondary columns"]{
+  before{
+    .ut.reset[];
+    `.log.info mock {[x] ::};
+    `.primary.memcap mock 1000;
+    `.primary.selfmem mock 100;
+    `.primary.paused mock 0b;
+    `.primary.pausedsince mock 0Np;
+    `.primary.pausedtotal mock 0D;
+    `.primary.pausecount mock 0;
+    `.primary.respawns mock (`long$())!`long$();
+    };
+  should["have total, cap, headroom and primary in the memory section"]{
+    `total`cap`headroom`primary mustmatch key .primary.status[]`memory;
+    };
+  should["add up the primary and the live secondaries, with headroom under the cap"]{
+    .ut.reg each 1 2;
+    update rssanon:200 300 from `secondaries;
+    m:.primary.status[]`memory;
+    600 musteq m`total;
+    1000 musteq m`cap;
+    400 musteq m`headroom;
+    100 musteq m`primary;
+    };
+  should["show negative headroom when over the cap"]{
+    .ut.reg 1;
+    update rssanon:1500 from `secondaries;
+    -600 musteq .primary.status[][`memory;`headroom];
+    };
+  should["show null cap and headroom when there is no cap"]{
+    `.primary.memcap mock 0N;
+    m:.primary.status[]`memory;
+    1b musteq null m`cap;
+    1b musteq null m`headroom;
+    };
+  should["show dispatch running with no pauses"]{
+    d:.primary.status[]`dispatch;
+    0b musteq d`paused;
+    0 musteq d`pausecount;
+    0D musteq d`pausedtotal;
+    };
+  should["count a pause that is still going on in pausedtotal"]{
+    `.primary.paused mock 1b;
+    `.primary.pausecount mock 2;
+    `.primary.pausedtotal mock 0D00:00:01;
+    `.primary.pausedsince mock .z.P-0D00:00:02;
+    d:.primary.status[]`dispatch;
+    1b musteq d`paused;
+    2 musteq d`pausecount;
+    / 1s from earlier pauses plus ~2s of this one
+    1b musteq d[`pausedtotal] within 0D00:00:03 0D00:00:04;
+    };
+  should["show each secondary's current task, memory and restarts"]{
+    .ut.reg each 1 2;
+    update currenttask:7 0N, rssanon:200 300 from `secondaries;
+    `.primary.respawns mock (enlist 2)!enlist 1;
+    t:`id xasc .primary.status[]`secondaries;
+    7 0N mustmatch t`currenttask;
+    200 300 mustmatch t`rssanon;
+    0 1 mustmatch t`restarts;
+    };
+  should["print without an error, paused or not, with or without a cap"]{
+    .ut.reg each 1 2;
+    mustnotthrow[();{.primary.showstatus[]}];
+    `.primary.paused mock 1b;
+    `.primary.pausedsince mock .z.P;
+    mustnotthrow[();{.primary.showstatus[]}];
+    `.primary.memcap mock 0N;
+    mustnotthrow[();{.primary.showstatus[]}];
+    };
+ };
