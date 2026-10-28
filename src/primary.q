@@ -40,6 +40,7 @@ system"l src/common/cgroup.q";
 .primary.pausecount:0;       // how many times dispatch has paused
 .primary.respawnmax:"J"$getenv`RESPAWN_MAX;   // how many times a spawned secondary is restarted after dying; 0 or null = never
 .primary.resultsroot:getenv `RESULTS_DIR;
+.primary.lastjobid:0;
 
 
 // dict of secondaries ids to their pids that the primary started
@@ -49,7 +50,7 @@ system"l src/common/cgroup.q";
 .primary.taskdefaults:([priority:0i; memestimate: 0N; timeout: .primary.tasktimeout; retriesmax: .primary.taskretries]);
 
 // what each task status can move too
-.primary.taskchange:([queued: enlist `dispatched; dispatched: `running`failed; running: `done`failed; done:`$(); failed:enlist `queued]);
+.primary.taskchange:([queued: `dispatched`failed; dispatched: `running`failed; running: `done`failed; done:`$(); failed:enlist `queued]);
 
 // the time column that gets updated at each task status
 .primary.statustime:([dispatched: `dispatchedtime; running: `startedtime; done: `finishedtime; failed: `finishedtime]);
@@ -208,6 +209,7 @@ system"l src/common/cgroup.q";
     sid:first exec secondaryid from tasks where taskid=tid;
     update status:`free, currenttask:0N from `secondaries where id=sid, currenttask=tid, status=`busy];
   if[newstate=`failed; .primary.retry tid];
+  if[newstate in `done`failed; .primary.jobcheck tid];
   if[newstate in `done`failed; .primary.dispatch[]];  // prevents us waiting on the timer, when bench marking this was the biggest thi
   1b
  };
@@ -341,6 +343,55 @@ system"l src/common/cgroup.q";
   if[not `done~r`state; '"task ",string[tid]," is ",string r`state];
   if[null r`resultpath; '"task ",string[tid]," has no result"];
   get r`resultpath
+ };
+
+// splits a job up into individual tasks
+// .primary.newjob[`vwap; 2026.01.01 2026.01.02 2026.01.03]
+.primary.newjob:{[tasktype; args]
+  if[not tasktype in .primary.tasktypes; '"unknown task type ",string tasktype];
+  if[not count args; '"no args: a job needs at least one task"];
+  jid:.primary.lastjobid+:1;
+  ids:.primary.newtask each {([tasktype: x; args: y])}[tasktype] each args;   // maybe change the name of the variable to taskt ?
+  update jobid:jid from `tasks where taskid in ids;
+  `jobs upsert (jid; tasktype; `int$count ids; `running; .z.P; 0Np; 0N; `; 0N; "");
+  .log.info "new job ",string[jid],": ",string[count ids]," ",string[tasktype]," tasks (",string[first ids],"..",string[last ids],")";
+  jid
+ };
+
+// checks if a job has completed, if yes updates the total size of the result of it
+// if it fails anywhere 
+.primary.jobcheck:{[tid]
+  jid:first exec jobid from tasks where taskid = tid;
+  if[null jid; :()];
+  if[not `running ~ first exec state from jobs where jobid = jid; :()];
+  states:exec state from tasks where jobid = jid;
+  if[`failed in states;
+    fail:first 0!select taskid, reason, err from tasks where jobid = jid, state = `failed;
+    error:"task ",string[fail`taskid]," failed (",string[fail`reason],"): ",fail`err;
+    update state:`failed, finishedtime:.z.P, err:enlist error from `jobs where jobid = jid;
+    .primary.canceljob jid;
+    :.log.warn "job ",string[jid]," failed: ",error];
+  if[all states=`done;
+    bytesize:exec sum resultbytes from tasks where jobid=jid;
+    update state:`done, finishedtime:.z.P, resultbytes:bytesize from `jobs where jobid = jid;
+    .log.info "job ",string[jid]," is done: ",string[count states]," tasks, ",.primary.mb bytesize];
+ };
+
+// if a task fails that is part of a bigger job it will cancel the remaining tasks for that job that havent started
+.primary.canceljob:{[jid]
+  qdtasks:exec taskid from tasks where jobid = jid, state = `queued;
+  if[not count qdtasks; :()];
+  .primary.taskupdate[; `failed; ([err:"cancelled: another part of job ",string[jid]," failed"; reason:`cancelled])] each qdtasks;
+  .log.warn "job ",string[jid],": cancelled ",string[count qdtasks]," queued tasks";
+ };
+
+// the result files of a finished job's parts, in task order, for the caller to load and combine:
+//   raze get each .primary.jobpaths jid
+// errors if the job doesn't exist or isn't done
+.primary.getjobresult:{[jid]
+  state:first exec state from jobs where jobid = jid;
+  if[not `done ~ state; '"job ",string[jid]," is ",string state];
+  raze .primary.getresult each exec taskid from tasks where jobid = jid, not null resultpath
  };
 
 // if a connection is close we need to mark it as closed

@@ -50,3 +50,4 @@ if[not `primary in key `; system "l src/primary.q"];
     mustthrow[(); {[] .primary.getresult .ut.rddone}];
     };
  };
+

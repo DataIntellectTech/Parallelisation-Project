@@ -41,14 +41,28 @@ tasks : ([taskid: `long$()]
   err:            (); 
   reason:         `$();            // `timeout`oom`error`lost`sendfailed
   resultpath:     `$();
-  resultbytes:    `long$()
+  resultbytes:    `long$();
+  jobid:          `long$()
  );
 
 // one row per memory poll, bounded to the last .primary.memhistorymax rows
-memhistory:([] 
+memhistory : ([] 
   time:         `timestamp$();
   total:        `long$();
   primary:      `long$();
   secondaries:  `long$();
   busy:         `int$()
+ );
+
+// groups of tasks submitted together; when every part is done their results are combined into one
+jobs : ([jobid: `long$()]
+  tasktype:       `$();
+  ntasks:         `int$();
+  state:          `$();
+  submittedtime:  `timestamp$();
+  finishedtime:   `timestamp$();
+  combinetask:    `long$();        // taskid of the combine task, null until it is queued
+  resultpath:     `$();            // the combined result, null until the job is done
+  resultbytes:    `long$();
+  err:            ()               // why the job failed, "" when it hasn't
  );

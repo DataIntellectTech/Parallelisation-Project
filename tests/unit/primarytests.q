@@ -12,7 +12,7 @@ if[not `primary in key `; system "l src/primary.q"];
 
 .tst.desc["check table schemas"]{
   should["return 3 tables"]{
-    3 musteq count tables[];
+    4 musteq count tables[];
     system "l schemas/primarytables.q";
    };
   should["have the correct schema for secondaries table"]{
@@ -20,8 +20,8 @@ if[not `primary in key `; system "l src/primary.q"];
     "jiisispjibbpp jjjp" mustmatch exec t from meta secondaries;
    };
   should["have the correct schema for the tasks table"]{
-    (`taskid`tasktype`args`priority`submittedtime`memestimate`timeout`retriesmax`retrycount`state`secondaryid`dispatchedtime`startedtime`finishedtime`membefore`memafter`err`reason`resultpath`resultbytes) mustmatch cols tasks;
-    "js ipjtiisjpppjj ssj" mustmatch exec t from meta tasks;
+    (`taskid`tasktype`args`priority`submittedtime`memestimate`timeout`retriesmax`retrycount`state`secondaryid`dispatchedtime`startedtime`finishedtime`membefore`memafter`err`reason`resultpath`resultbytes`jobid) mustmatch cols tasks;
+    "js ipjtiisjpppjj ssjj" mustmatch exec t from meta tasks;
    };
   should["have the correct schema for memhistory table"]{
     (`time`total`primary`secondaries`busy) mustmatch cols memhistory;
