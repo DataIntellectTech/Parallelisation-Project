@@ -333,6 +333,16 @@ system"l src/common/cgroup.q";
   1b
  };
 
+// gets the result for a given taskid, also allows results to live beyond the life of the primary
+// fails if the task doesnt exist or has a null result
+.primary.getresult:{[tid]
+  r:tasks tid;
+  if[null r`state; '"no task ",string tid];
+  if[not `done~r`state; '"task ",string[tid]," is ",string r`state];
+  if[null r`resultpath; '"task ",string[tid]," has no result"];
+  get r`resultpath
+ };
+
 // if a connection is close we need to mark it as closed
 // we will now restart a secondary if it is closed and under .primary.respawnsmax
 .z.pc:{[h]
