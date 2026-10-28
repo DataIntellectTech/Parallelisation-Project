@@ -35,7 +35,8 @@ if[not `primary in key `; system "l src/primary.q"];
     id:.primary.newtask `tasktype`args!(`sum;1000000);
     (enlist 1000000) mustmatch tasks[id]`args;
     1000000 musteq first tasks[id]`args;
-    1b musteq (::)~first tasks[id]`result;
+    1b musteq null tasks[id]`resultpath;
+    1b musteq null tasks[id]`resultbytes;
     };
   should["fill the optional fields from the defaults"]{
     id:.primary.newtask `tasktype`args!(`sleep;200);

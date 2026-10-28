@@ -116,7 +116,7 @@ if[not `primary in key `; system "l src/primary.q"];
   should["leave queued and done tasks alone however old"]{
     / finish d first: its done would dispatch any task already queued
     d:.ut.tosend[1;1b];
-    .primary.taskupdate[d;`done;`result`membefore`memafter!(enlist 1;0;0)];
+    .primary.taskupdate[d;`done;`resultpath`resultbytes`membefore`memafter!(`:x;0;0;0)];
     qt:.primary.newtask `tasktype`args`timeout!(`sleep;1;00:00:01.000);
     update submittedtime:.z.P-0D01:00, dispatchedtime:.z.P-0D01:00, startedtime:.z.P-0D01:00 from `tasks;
     .primary.checktimeouts[];

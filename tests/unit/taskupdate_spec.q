@@ -1,5 +1,4 @@
 / unit specs for .primary.taskupdate, the only way a task changes state
-/ callers are internal, so argument types are not checked; callers box result with enlist
 / loads primary.q once (spawning off); each test puts its own task (id 900) in a known state first
 / run: tests/run.sh tests/unit/taskupdate_spec.q
 
@@ -10,8 +9,8 @@ if[not `primary in key `; system "l src/primary.q"];
 
 / a full task row for .ut.tuid in state s
 .ut.tuprow:{[s]
-  `taskid`tasktype`args`priority`submittedtime`memestimate`timeout`retriesmax`retrycount`state`secondaryid`dispatchedtime`startedtime`finishedtime`membefore`memafter`err`reason`result!
-  (.ut.tuid;`noop;enlist 1;0i;.z.P;0N;00:01:00.000;3i;0i;s;0N;0Np;0Np;0Np;0N;0N;"";`;enlist (::))
+  `taskid`tasktype`args`priority`submittedtime`memestimate`timeout`retriesmax`retrycount`state`secondaryid`dispatchedtime`startedtime`finishedtime`membefore`memafter`err`reason`resultpath`resultbytes!
+  (.ut.tuid;`noop;enlist 1;0i;.z.P;0N;00:01:00.000;3i;0i;s;0N;0Np;0Np;0Np;0N;0N;"";`; `; 0N)
  };
 
 / put task .ut.tuid into state s, replacing any earlier row
@@ -45,11 +44,12 @@ if[not `primary in key `; system "l src/primary.q"];
     };
   should["move running to done and store the result and memory"]{
     .ut.tuset `running;
-    1b musteq .primary.taskupdate[.ut.tuid;`done;`membefore`memafter`result!(1000;800;enlist 42)];
+    1b musteq .primary.taskupdate[.ut.tuid;`done;`membefore`memafter`resultpath`resultbytes!(1000;800;`:/tmp/x;16)];
     r:.ut.tuget[];
     `done musteq r`state;
     1b musteq not null r`finishedtime;
-    42 musteq first r`result;
+    `:/tmp/x musteq r`resultpath;
+    16 musteq r`resultbytes;
     1000 musteq r`membefore;
     800 musteq r`memafter;
     };

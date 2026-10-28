@@ -349,6 +349,9 @@ We can see the kernal mem stats at `/proc/<pid>/status` file
 
 **VmHWM**: The largest `VmRSS` has been since the process has started or the last reset. (this can be done by writing `5` to `/pric/<pid>/clear_refs`)
 
+We are using these instead of `.Q.w[]` as we can read `/proc/<pid>/status` at any time and `RSS` is what the kernal enforces.
+
+
 Too test `OOM` i might need to use `cgroups` this allows me to allocate a certain amount of RAM to my processes so they will be chosen to kill first if mem limits are reached
 
 Claude steps

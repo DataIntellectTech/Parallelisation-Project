@@ -39,8 +39,9 @@ tasks : ([taskid: `long$()]
   membefore:      `long$();
   memafter:       `long$();
   err:            (); 
-  reason:         `$();            // `timeout`unknown`oom
-  result:         ()
+  reason:         `$();            // `timeout`oom`error`lost`sendfailed
+  resultpath:     `$();
+  resultbytes:    `long$()
  );
 
 // one row per memory poll, bounded to the last .primary.memhistorymax rows

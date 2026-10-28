@@ -39,6 +39,7 @@ system"l src/common/cgroup.q";
 .primary.pausedtotal:0D;     // total time spent paused
 .primary.pausecount:0;       // how many times dispatch has paused
 .primary.respawnmax:"J"$getenv`RESPAWN_MAX;   // how many times a spawned secondary is restarted after dying; 0 or null = never
+.primary.resultsroot:getenv `RESULTS_DIR;
 
 
 // dict of secondaries ids to their pids that the primary started
@@ -63,6 +64,7 @@ system"l src/common/cgroup.q";
 .primary.register:{[info]
   `secondaries upsert (info`id; .z.w; info`pid; info`host; info`port; `free; .z.P; 0N; 0Ni; 1b; info[`id] in key .primary.spawned; .z.P; .z.P; (); 0N; 0N; 0N; 0Np);
   .log.info "secondary ", string[info`id], " registered at: ", string .z.P;
+  .primary.resultsdir
  };
 
 // to be called by each secondary except when its status is running, ran based off HEARTBEAT_MS
@@ -180,7 +182,7 @@ system"l src/common/cgroup.q";
   tid:.primary.nexttaskid[];
   data:.primary.taskdefaults,task,
     ([taskid:tid; args:enlist task`args; submittedtime:.z.P; retrycount:0i; state:`queued; secondaryid:0N; dispatchedtime:0Np; startedtime:0Np;
-    finishedtime:0Np; membefore:0N; memafter:0N; err:""; reason:`; result:enlist (::)]);
+    finishedtime:0Np; membefore:0N; memafter:0N; err:""; reason:`; resultpath:`; resultbytes:0N]);
   `tasks upsert data;
   .log.info "new task ",string[tid]," ",string task`tasktype;
   tid
@@ -352,13 +354,17 @@ system"l src/common/cgroup.q";
 
 // start sequence
 .primary.start:{
+  if[not count .primary.resultsroot; '"RESULTS_DIR is not set"];
+  .primary.resultsdir::.primary.resultsroot,"/",ssr[string .z.P;":";"."];
+  system "mkdir -p ",.primary.resultsdir;
+  .log.info "task results will be saved in ",.primary.resultsdir;
+  .primary.cgroupdir:.cgroup.dir[];
+  .primary.oomkills:.cgroup.oomkills .primary.cgroupdir;
   if[.primary.spawnsecondaries; .primary.spawn each 1+til .primary.numsecondaries];
   .timer.addjob.custom[`stalecheck; {.primary.check[]}; (); 1; 2; ()!()];
   .timer.addjob.custom[`dispatch; {.primary.dispatch[]}; (); 1; 2; ()!()];
   .timer.addjob.custom[`mempoll; {.primary.pollmem[]}; (); 1; 2; ()!()];
   .timer.addjob.custom[`timeoutcheck; {.primary.checktimeouts[]}; (); 1; 2; ()!()];
-  .primary.cgroupdir:.cgroup.dir[];
-  .primary.oomkills:.cgroup.oomkills .primary.cgroupdir;
   .log.info "primary started, listening on ",string system "p";
   .primary.starttime:: .z.P;
  };

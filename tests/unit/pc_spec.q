@@ -114,7 +114,7 @@ if[not `primary in key `; system "l src/primary.q"];
     update handle:5i from `secondaries where id=2;
     tid:.ut.pcsend 1;
     .primary.taskupdate[tid;`running;()!()];
-    .primary.taskupdate[tid;`done;`result`membefore`memafter!(enlist 1;0;0)];
+    .primary.taskupdate[tid;`done;`resultpath`resultbytes`membefore`memafter!(`:x;0;0;0)];
     .z.pc 0i;
     `done musteq tasks[tid]`state;
     `closed musteq secondaries[1]`status;

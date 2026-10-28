@@ -12,7 +12,7 @@ system"l src/approvedtasks.q";
 system"l src/common/mem.q";
 
 // if hdb set load it in
-if[count .primary.hdb:getenv `HDB_DIR;
+if[count .secondary.hdb:getenv `HDB_DIR;
   system "l ",getenv `HDB_DIR;
  ];
 
@@ -58,28 +58,42 @@ if[count .primary.hdb:getenv `HDB_DIR;
 // send an async message to the primary and flush it straight away
 .secondary.send:{[msg] neg[.secondary.handle] msg; neg[.secondary.handle][]};
 
-// sec tells pri it is starting, record mem before, run task, record mem after result, .Q.gc[],  send result
+// sec tells pri it is starting, record mem before, run task, record mem after result, .Q.gc[], save result, returns where result is saved and its size
 .secondary.runtask:{[tid; tasktype; args]
   .secondary.send (`.primary.taskupdate; tid; `running; ()!());
   membefore:.mem.readandclear[]`rssanon;    // better than using .Q.w[]`heap
-  if[not tasktype in at:key .secondary.approvedtasks;
+  if[not tasktype in at: key .secondary.approvedtasks;
     .log.warn "the task ",string[tasktype]," is not in the approved tasks list. Approved tasks are: ",", " sv string at;
     :.secondary.send (`.primary.taskupdate; tid; `failed; `err`reason`membefore`memafter!("unknown tasktype: ",string tasktype; `error; membefore; membefore))];
   res:@[{.secondary.approvedtasks[x] y}[tasktype;]; args; {[error] (`failure; error)}];
   memafter:first exec vmhwm from .mem.read enlist .z.i;
-  .Q.gc[];
-  if[`failure ~ first res; 
+  if[`failure ~ first res;
+    .Q.gc[];
     .log.warn "task ",string[tid],", failed with error: ",last res;
     :.secondary.send (`.primary.taskupdate; tid; `failed; `err`reason`membefore`memafter!(last res; `error; membefore; memafter))];
-  .log.info "task ",string[tid]," is complete";
-  .secondary.send (`.primary.taskupdate; tid; `done; `result`membefore`memafter!(enlist res; membefore; memafter));
+  saved:.secondary.save[tid; res];
+  res:(::);
+  .Q.gc[];
+  if[`failure ~ first saved;
+    .log.warn "task ",string[tid],", could not save its result: ",last saved;
+    :.secondary.send (`.primary.taskupdate; tid; `failed; `err`reason`membefore`memafter!("could not save the result: ",last saved; `savefailed; membefore; memafter))];
+  .log.info "task ",string[tid]," is complete, result saved to ",string first saved;
+  .secondary.send (`.primary.taskupdate; tid; `done; `resultpath`resultbytes`membefore`memafter!(first saved; last saved; membefore; memafter));
+ };
+
+// save a tasks result, returns path and bytes, doesnt save if a null is the result
+.secondary.save:{[tid; res]
+  if[(::)~res; :(`; 0)];
+  path:hsym `$.secondary.resultsdir,"/",string tid;
+  @[{[p;r] p set r; (p; hcount p)}[path]; res; {[e] (`failure; e)}]
  };
 
 // start sequence
 .secondary.start:{
   .secondary.oomscore[];
   .secondary.handle:: .secondary.connect[];
-  neg[.secondary.handle](`.primary.register; .secondary.info);
+  .secondary.resultsdir:: @[.secondary.handle; (`.primary.register; .secondary.info); {[error] .log.error "registering with the primary failed with error: ",error,". Will exit the process now"; exit 1}];
+  .log.info "registered with the primary, saving results in ",.secondary.resultsdir;
   .timer.addjob.custom[`heartbeat; {.secondary.heartbeat[]}; (); 1; 2; ()!()];
   .log.info "secondary ",string[.secondary.id]," started, listening on ",string system "p";
  };

@@ -29,7 +29,7 @@ system "l tests/helpers/it.q";
     tid:.it.dispatch[1;`sumtil;`sumtil;1000000];
     1b musteq .it.waitstate[tid;`done;10];
     t:.it.task tid;
-    499999500000 musteq first t`result;
+    499999500000 musteq get t`resultpath;
     1 musteq t`secondaryid;
     1b musteq all not null t`dispatchedtime`startedtime`finishedtime;
     };
