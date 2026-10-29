@@ -420,3 +420,22 @@ q).primary.showstatus[]                   / that secondary is back, restarts 1
 Always set `MemorySwapMax=0`: without it the kernel swaps the process instead of
 killing it, and homer already uses a lot of swap.
 
+
+# Demo
+
+1. show how to start and how to run jobs, start with cgroups
+2. do a comparison between 8 secondaries and 8 threads for the same query
+    1. show the mem used for a single job before and after
+3. show a job failing with;
+    1. timeout error
+    2. oom
+    3. retry
+4. how to get results
+
+## To Do
+
+1. add in the global mem cap limit and test with 30GB
+2. add deferred sync so when i run a job form another processes it will block the user until the job is complete
+3. a tidy up of the code, probably stick things in separate scripts where possible
+
+ 

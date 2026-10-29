@@ -335,16 +335,6 @@ system"l src/common/cgroup.q";
   1b
  };
 
-// gets the result path for a given taskid, also allows results to live beyond the life of the primary
-// fails if the task doesnt exist or has a null result
-.primary.resultpath:{[tid]
-  r:tasks tid;
-  if[null r`state; '"no task ",string tid];
-  if[not `done~r`state; '"task ",string[tid]," is ",string r`state];
-  if[null r`resultpath; '"task ",string[tid]," has no result"];
-  r`resultpath
- };
-
 // splits a job up into individual tasks
 // .primary.newjob[`vwap; 2026.01.01 2026.01.02 2026.01.03]
 .primary.newjob:{[tasktype; args]
