@@ -1,4 +1,4 @@
-/ unit specs for jobs: .primary.newjob, .primary.jobcheck (via taskupdate), .primary.canceljob and .primary.getjobresult
+/ unit specs for jobs: .primary.newjob, .primary.jobcheck (via taskupdate), .primary.canceljob and .primary.jobpaths
 / loads primary.q once (spawning off). No secondaries are registered, so nothing is dispatched: each test moves a
 / job's tasks through their states with .primary.taskupdate, as a secondary would, and saves results by hand
 / run: tests/run.sh tests/unit/jobs_spec.q
@@ -183,7 +183,7 @@ if[not `primary in key `; system "l src/primary.q"];
     };
  };
 
-.tst.desc[".primary.getjobresult"]{
+.tst.desc[".primary.jobpaths"]{
   before{
     .ut.jbmocks[];
     .ut.jbreset[];
@@ -191,34 +191,41 @@ if[not `primary in key `; system "l src/primary.q"];
   after{
     system "rm -rf ",.ut.jbdir;
     };
-  should["combine the parts' results in task order, whatever order they finished in"]{
+  should["give the parts' result files in task order"]{
+    j:.ut.jbnew 3;
+    t:.ut.jbtids j;
+    .ut.jbdone[;1] each t;
+    ({hsym `$.ut.jbdir,"/",string x} each t) mustmatch .primary.jobpaths j;
+    };
+  should["combine to the parts' results in task order, whatever order they finished in"]{
     j:.ut.jbnew 3;
     t:.ut.jbtids j;
     .ut.jbdone'[reverse t; (5 6;3 4;1 2)];
-    1 2 3 4 5 6 mustmatch .primary.getjobresult j;
+    1 2 3 4 5 6 mustmatch raze get each .primary.jobpaths j;
     };
   should["combine tables into one table"]{
     j:.ut.jbnew 2;
     t:.ut.jbtids j;
     .ut.jbdone'[t; (([] a:1 2); ([] a:3 4))];
-    ([] a:1 2 3 4) mustmatch .primary.getjobresult j;
+    ([] a:1 2 3 4) mustmatch raze get each .primary.jobpaths j;
     };
-  should["skip parts that returned no result"]{
+  should["leave out parts that returned no result"]{
     j:.ut.jbnew 3;
     t:.ut.jbtids j;
     .ut.jbdone'[t; (1 2;::;3 4)];
-    1 2 3 4 mustmatch .primary.getjobresult j;
+    2 musteq count .primary.jobpaths j;
+    1 2 3 4 mustmatch raze get each .primary.jobpaths j;
     };
   should["error for a job that isn't done"]{
     `.ut.jbj set .ut.jbnew 2;
-    mustthrow[(); {[] .primary.getjobresult .ut.jbj}];
+    mustthrow[(); {[] .primary.jobpaths .ut.jbj}];
     };
   should["error for a failed job"]{
     `.ut.jbj set .ut.jbnew 2;
     .ut.jbfail[first .ut.jbtids .ut.jbj; `error];
-    mustthrow[(); {[] .primary.getjobresult .ut.jbj}];
+    mustthrow[(); {[] .primary.jobpaths .ut.jbj}];
     };
   should["error for a job that doesn't exist"]{
-    mustthrow[(); {[] .primary.getjobresult 99}];
+    mustthrow[(); {[] .primary.jobpaths 99}];
     };
  };

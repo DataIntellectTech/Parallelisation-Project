@@ -335,14 +335,14 @@ system"l src/common/cgroup.q";
   1b
  };
 
-// gets the result for a given taskid, also allows results to live beyond the life of the primary
+// gets the result path for a given taskid, also allows results to live beyond the life of the primary
 // fails if the task doesnt exist or has a null result
-.primary.getresult:{[tid]
+.primary.resultpath:{[tid]
   r:tasks tid;
   if[null r`state; '"no task ",string tid];
   if[not `done~r`state; '"task ",string[tid]," is ",string r`state];
   if[null r`resultpath; '"task ",string[tid]," has no result"];
-  get r`resultpath
+  r`resultpath
  };
 
 // splits a job up into individual tasks
@@ -385,13 +385,12 @@ system"l src/common/cgroup.q";
   .log.warn "job ",string[jid],": cancelled ",string[count qdtasks]," queued tasks";
  };
 
-// the result files of a finished job's parts, in task order, for the caller to load and combine:
-//   raze get each .primary.jobpaths jid
-// errors if the job doesn't exist or isn't done
-.primary.getjobresult:{[jid]
+// get the paths to where the result was saved for all tasks under the same jobid
+// example run; raze get each .primary.jobpaths 1
+.primary.jobpaths:{[jid]
   state:first exec state from jobs where jobid = jid;
   if[not `done ~ state; '"job ",string[jid]," is ",string state];
-  raze .primary.getresult each exec taskid from tasks where jobid = jid, not null resultpath
+  exec resultpath from tasks where jobid = jid, not null resultpath
  };
 
 // if a connection is close we need to mark it as closed
