@@ -436,6 +436,6 @@ killing it, and homer already uses a lot of swap.
 
 1. add in the global mem cap limit and test with 30GB
 2. add deferred sync so when i run a job form another processes it will block the user until the job is complete
-3. a tidy up of the code, probably stick things in separate scripts where possible
+3. a tidy up of the code (mix of 4 and before dict usages), probably stick things in separate scripts where possible
 
  

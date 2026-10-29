@@ -183,7 +183,7 @@ system"l src/common/cgroup.q";
   tid:.primary.nexttaskid[];
   data:.primary.taskdefaults,task,
     ([taskid:tid; args:enlist task`args; submittedtime:.z.P; retrycount:0i; state:`queued; secondaryid:0N; dispatchedtime:0Np; startedtime:0Np;
-    finishedtime:0Np; membefore:0N; memafter:0N; err:""; reason:`; resultpath:`; resultbytes:0N]);
+    finishedtime:0Np; membefore:0N; memafter:0N; memaftergc:0N; err:""; reason:`; resultpath:`; resultbytes:0N]);
   `tasks upsert data;
   .log.info "new task ",string[tid]," ",string task`tasktype;
   tid
@@ -251,7 +251,7 @@ system"l src/common/cgroup.q";
     .log.warn "task ",string[tid]," has used all ",string[t`retriesmax]," retries, leaving it failed";
     :0b];
   .log.info "retrying task ",string[tid],", retry ",string[1+t`retrycount]," of ",string t`retriesmax;
-  .primary.taskupdate[tid; `queued; ([retrycount:1i+t`retrycount; secondaryid:0N; dispatchedtime:0Np; startedtime:0Np; finishedtime:0Np; membefore:0N; memafter:0N; err:""; reason:`])];
+  .primary.taskupdate[tid; `queued; ([retrycount:1i+t`retrycount; secondaryid:0N; dispatchedtime:0Np; startedtime:0Np; finishedtime:0Np; membefore:0N; memafter:0N; memaftergc:0N; err:""; reason:`])];
  };
 
 // Claude with minor edits from me
@@ -340,10 +340,13 @@ system"l src/common/cgroup.q";
 .primary.newjob:{[tasktype; args]
   if[not tasktype in .primary.tasktypes; '"unknown task type ",string tasktype];
   if[not count args; '"no args: a job needs at least one task"];
+  ids:.primary.newtask each {([tasktype: x; args: y])}[tasktype] each args;
+  if[any null ids;
+    delete from `tasks where taskid in ids;
+    '"could not create every task for the job, see the log"];
   jid:.primary.lastjobid+:1;
-  ids:.primary.newtask each {([tasktype: x; args: y])}[tasktype] each args;   // maybe change the name of the variable to taskt ?
   update jobid:jid from `tasks where taskid in ids;
-  `jobs upsert (jid; tasktype; `int$count ids; `running; .z.P; 0Np; 0N; `; 0N; "");
+  `jobs upsert (jid; tasktype; `int$count ids; `running; .z.P; 0Np; 0N; "");
   .log.info "new job ",string[jid],": ",string[count ids]," ",string[tasktype]," tasks (",string[first ids],"..",string[last ids],")";
   jid
  };

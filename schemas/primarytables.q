@@ -36,8 +36,9 @@ tasks : ([taskid: `long$()]
   dispatchedtime: `timestamp$();
   startedtime:    `timestamp$();
   finishedtime:   `timestamp$();
-  membefore:      `long$();
-  memafter:       `long$();
+  membefore:      `long$();        // RssAnon before running 
+  memafter:       `long$();        // peak during the task VmHWN
+  memaftergc:     `long$();        // RssAnon after the task ends and .Q.gc
   err:            (); 
   reason:         `$();            // `timeout`oom`error`lost`sendfailed
   resultpath:     `$();
@@ -61,8 +62,6 @@ jobs : ([jobid: `long$()]
   state:          `$();
   submittedtime:  `timestamp$();
   finishedtime:   `timestamp$();
-  combinetask:    `long$();        // taskid of the combine task, null until it is queued
-  resultpath:     `$();            // the combined result, null until the job is done
   resultbytes:    `long$();
   err:            ()               // why the job failed, "" when it hasn't
  );

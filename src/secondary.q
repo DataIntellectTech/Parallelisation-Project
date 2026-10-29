@@ -58,7 +58,7 @@ if[count .secondary.hdb:getenv `HDB_DIR;
 // send an async message to the primary and flush it straight away
 .secondary.send:{[msg] neg[.secondary.handle] msg; neg[.secondary.handle][]};
 
-// sec tells pri it is starting, record mem before, run task, record mem after result, .Q.gc[], save result, returns where result is saved and its size
+// secondary tells primary it is starting, record mem before, run task, record mem after result, .Q.gc[], save result, returns where result is saved and its size
 .secondary.runtask:{[tid; tasktype; args]
   .secondary.send (`.primary.taskupdate; tid; `running; ()!());
   membefore:.mem.readandclear[]`rssanon;    // better than using .Q.w[]`heap
@@ -69,16 +69,18 @@ if[count .secondary.hdb:getenv `HDB_DIR;
   memafter:first exec vmhwm from .mem.read enlist .z.i;
   if[`failure ~ first res;
     .Q.gc[];
+    memaftergc:first exec rssanon from .mem.read enlist .z.i;
     .log.warn "task ",string[tid],", failed with error: ",last res;
-    :.secondary.send (`.primary.taskupdate; tid; `failed; `err`reason`membefore`memafter!(last res; `error; membefore; memafter))];
+    :.secondary.send (`.primary.taskupdate; tid; `failed; `err`reason`membefore`memafter`memaftergc!(last res; `error; membefore; memafter; memaftergc))];
   saved:.secondary.save[tid; res];
   res:(::);
   .Q.gc[];
+  memaftergc:first exec rssanon from .mem.read enlist .z.i;
   if[`failure ~ first saved;
     .log.warn "task ",string[tid],", could not save its result: ",last saved;
-    :.secondary.send (`.primary.taskupdate; tid; `failed; `err`reason`membefore`memafter!("could not save the result: ",last saved; `savefailed; membefore; memafter))];
+    :.secondary.send (`.primary.taskupdate; tid; `failed; `err`reason`membefore`memafter`memaftergc!("could not save the result: ",last saved; `savefailed; membefore; memafter; memaftergc))];
   .log.info "task ",string[tid]," is complete, result saved to ",string first saved;
-  .secondary.send (`.primary.taskupdate; tid; `done; `resultpath`resultbytes`membefore`memafter!(first saved; last saved; membefore; memafter));
+  .secondary.send (`.primary.taskupdate; tid; `done; `resultpath`resultbytes`membefore`memafter`memaftergc!(first saved; last saved; membefore; memafter; memaftergc));
  };
 
 // save a tasks result, returns path and bytes, doesnt save if a null is the result
