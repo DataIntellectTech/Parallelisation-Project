@@ -18,7 +18,7 @@ if[not `primary in key `; system "l src/primary.q"];
 
 / a job of n sumtil tasks with 3 retries each, returns the job id
 .ut.jbnew:{[n]
-  j:.primary.newjob[`sumtil; 10*1+til n];
+  j:.primary.newjob[`sumtil; 10*1+til n; ()!()];
   update retriesmax:3i from `tasks where jobid=j;
   j
  };
@@ -66,29 +66,29 @@ if[not `primary in key `; system "l src/primary.q"];
     system "rm -rf ",.ut.jbdir;
     };
   should["create one task per arg, all with the job's id"]{
-    j:.primary.newjob[`sumtil; 10 20 30];
+    j:.primary.newjob[`sumtil; 10 20 30; ()!()];
     3 musteq count .ut.jbtids j;
     1b musteq all j=exec jobid from tasks;
     };
   should["give each task its own arg, in order"]{
-    j:.primary.newjob[`sumtil; 10 20 30];
+    j:.primary.newjob[`sumtil; 10 20 30; ()!()];
     10 20 30 mustmatch exec first each args from tasks where jobid=j;
     };
   should["add the job as running with its number of tasks"]{
-    j:.primary.newjob[`sumtil; 10 20 30];
+    j:.primary.newjob[`sumtil; 10 20 30; ()!()];
     (`running;3i) mustmatch jobs[j]`state`ntasks;
     1b musteq not null jobs[j]`submittedtime;
     };
   should["give each job the next id"]{
-    1 2 mustmatch {[x] .primary.newjob[`sumtil; 1 2]} each 1 2;
+    1 2 mustmatch {[x] .primary.newjob[`sumtil; 1 2; ()!()]} each 1 2;
     };
   should["error for an unknown task type and create nothing"]{
-    mustthrow[(); {[] .primary.newjob[`nope; 1 2]}];
+    mustthrow[(); {[] .primary.newjob[`nope; 1 2; ()!()]}];
     0 musteq count jobs;
     0 musteq count tasks;
     };
   should["error for no args and create nothing"]{
-    mustthrow[(); {[] .primary.newjob[`sumtil; ()]}];
+    mustthrow[(); {[] .primary.newjob[`sumtil; (); ()!()]}];
     0 musteq count jobs;
     0 musteq count tasks;
     };
@@ -227,5 +227,73 @@ if[not `primary in key `; system "l src/primary.q"];
     };
   should["error for a job that doesn't exist"]{
     mustthrow[(); {[] .primary.jobpaths 99}];
+    };
+ };
+
+.tst.desc[".primary.newjob - params"]{
+  before{
+    .ut.jbmocks[];
+    .ut.jbreset[];
+    };
+  after{
+    system "rm -rf ",.ut.jbdir;
+    };
+  should["give every task the job's params"]{
+    j:.primary.newjob[`sumtil; 10 20; ([priority:5i; timeout:00:00:05.000; retriesmax:1i])];
+    5 5i mustmatch exec priority from tasks where jobid=j;
+    1b musteq all 00:00:05.000=exec timeout from tasks where jobid=j;
+    1 1i mustmatch exec retriesmax from tasks where jobid=j;
+    };
+  should["record the job's priority"]{
+    j:.primary.newjob[`sumtil; 10 20; ([priority:5i])];
+    5i musteq jobs[j]`priority;
+    };
+  should["use the defaults when there are no params"]{
+    j:.primary.newjob[`sumtil; 10 20; ()!()];
+    (.primary.taskdefaults`priority) musteq jobs[j]`priority;
+    1b musteq all .primary.tasktimeout=exec timeout from tasks where jobid=j;
+    };
+  should["accept a priority given as a long"]{
+    j:.primary.newjob[`sumtil; 10 20; ([priority:7])];
+    7 7i mustmatch exec priority from tasks where jobid=j;
+    7i musteq jobs[j]`priority;
+    };
+  should["error for an unknown param and create nothing"]{
+    mustthrow[(); {[] .primary.newjob[`sumtil; 10 20; ([prioirty:5])]}];
+    0 musteq count jobs;
+    0 musteq count tasks;
+    };
+ };
+
+/ finish a task that has been sent: running, then done with no result file
+.ut.jbfinish:{[tid]
+  .primary.taskupdate[tid;`running;()!()];
+  .primary.taskupdate[tid;`done;([resultpath:`; resultbytes:0; membefore:0; memafter:0])];
+ };
+
+.tst.desc["priority: a later, higher-priority job goes ahead of an earlier one"]{
+  before{
+    .ut.jbmocks[];
+    .ut.jbreset[];
+    / record the order tasks are sent in; one secondary on handle 0i, so sends run here
+    `.ut.jbsent set `long$();
+    .tst.mock[`.secondary.runtask; {[tid;tt;a] .ut.jbsent,:tid}];
+    .primary.register `id`pid`host`port!(1;101i;`localhost;45001i);
+    };
+  after{
+    system "rm -rf ",.ut.jbdir;
+    };
+  should["send the high-priority job's tasks next, then the rest of the earlier job"]{
+    lo:.ut.jbtids .primary.newjob[`sumtil; 10 20 30; ()!()];
+    hi:.ut.jbtids .primary.newjob[`sumtil; 40 50; ([priority:10])];
+    / the first low task went straight away; each finish frees the secondary and sends the next
+    do[4; .ut.jbfinish last .ut.jbsent];
+    ((first lo),hi,1_lo) mustmatch .ut.jbsent;
+    };
+  should["keep tasks of the same priority in the order they were submitted"]{
+    a:.ut.jbtids .primary.newjob[`sumtil; 10 20; ()!()];
+    b:.ut.jbtids .primary.newjob[`sumtil; 30 40; ()!()];
+    do[3; .ut.jbfinish last .ut.jbsent];
+    (a,b) mustmatch .ut.jbsent;
     };
  };

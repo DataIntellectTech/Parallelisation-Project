@@ -335,19 +335,25 @@ system"l src/common/cgroup.q";
   1b
  };
 
+.primary.taskdefaults:([priority:0i; memestimate: 0N; timeout: .primary.tasktimeout; retriesmax: .primary.taskretries]);
 // splits a job up into individual tasks
-// .primary.newjob[`vwap; 2026.01.01 2026.01.02 2026.01.03]
-.primary.newjob:{[tasktype; args]
+// .primary.newjob[`vwap; 2026.01.01 2026.01.02 2026.01.03; ([priority:1])]
+// .primary.newjob[`vwap; 2026.01.01 2026.01.02 2026.01.03; ()!()]
+.primary.newjob:{[tasktype; args; params]
   if[not tasktype in .primary.tasktypes; '"unknown task type ",string tasktype];
   if[not count args; '"no args: a job needs at least one task"];
-  ids:.primary.newtask each {([tasktype: x; args: y])}[tasktype] each args;
+  if[not all key[params] in key .primary.taskdefaults; '"optional parasm are: ",", " sv string key .primary.taskdefaults];
+  params:@[.primary.taskdefaults, params; `priority`retriesmax; `int$];
+  ids:.primary.newtask each {y,([tasktype: x; args: z])}[tasktype;params] each args;
   if[any null ids;
     delete from `tasks where taskid in ids;
     '"could not create every task for the job, see the log"];
   jid:.primary.lastjobid+:1;
   update jobid:jid from `tasks where taskid in ids;
-  `jobs upsert (jid; tasktype; `int$count ids; `running; .z.P; 0Np; 0N; "");
-  .log.info "new job ",string[jid],": ",string[count ids]," ",string[tasktype]," tasks (",string[first ids],"..",string[last ids],")";
+  pri:params`priority;
+  `jobs upsert (jid; tasktype; `int$count ids; pri; `running; .z.P; 0Np; 0N; "");
+  .log.info "new job ",string[jid],": ",string[count ids]," ",string[tasktype]," tasks (",string[first ids],"..",string[last ids],"), priority ",string pri;
+  .primary.dispatch[];
   jid
  };
 

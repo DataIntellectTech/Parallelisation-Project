@@ -59,6 +59,7 @@ memhistory : ([]
 jobs : ([jobid: `long$()]
   tasktype:       `$();
   ntasks:         `int$();
+  priority:       `int$();
   state:          `$();
   submittedtime:  `timestamp$();
   finishedtime:   `timestamp$();

@@ -423,19 +423,194 @@ killing it, and homer already uses a lot of swap.
 
 # Demo
 
-1. show how to start and how to run jobs, start with cgroups
+1. show how to start with cgroups
+```bash
+set -a; source config/default.env; set +a
+systemd-run --user --scope -p MemoryMax=$GLOBAL_MEM_LIMIT -p MemorySwapMax=0 $KDBX_HOME/bin/q src/primary.q -p 45000
+# systemd-run --user --scope         # run a command in a new cgroup of its own
+# -p MemoryMax=$GLOBAL_MEM_LIMIT     # the hard cap: the kernel kills inside this cgroup above 4GB
+# -p MemorySwapMax=0                 # kill rather than swap
+# $KDBX_HOME/bin/q                   # it has to be the full path as systemd-run can't see the x alias
+```
+```q
+.primary.cgroupdir                                    / the cgroup the primary and secondaries are in
+system "cat ",.primary.cgroupdir,"/memory.max"        / 4294967296: the kernel's cap
+.primary.showstatus[]                                 / 8 secondaries, all free
+```
+
 2. do a comparison between 8 secondaries and 8 threads for the same query
-    1. show the mem used for a single job before and after
-3. show a job failing with;
-    1. timeout error
-    2. oom
-    3. retry
-4. how to get results
+```bash
+# in a different terminal run
+cd ~/internalWork/Parallelisation-Project
+set -a; source config/default.env; set +a
+x src/approvedtasks.q -s 8
+```
+Then
+```q
+// load in the hdb
+\l /home/jrutledge/internalWork/hdb
+
+// check the number of dates
+count date
+
+// check our function exists
+.task.vwap
+
+// time how long it takes
+start:.z.P; raze .task.vwap peach date ; .z.P-start
+// 0D00:00:09.232734870
+
+// cache loaded in
+start:.z.P; raze .task.vwap peach date ; .z.P-start
+// 0D00:00:00.770165808
+```
+Now connect to the primary
+```q
+// connect to the primary
+h:hopen 45000
+
+// check the approved functions
+h".primary.tasktypes"
+
+// show a bad task: only approved task types can run, this is refused before anything is created
+jobID:h(`.primary.newjob; `bad; date; ()!())
+
+// run a good task: one job, one task per date, ()!() for no params
+jobID:h(`.primary.newjob; `vwap; date; ()!())
+
+// run this until it is done
+h({jobs x}; jobID)
+
+// time how long it took to run
+h({exec finishedtime-submittedtime from jobs where jobid=x}; jobID)
+start:.z.P; raze get each h(`.primary.jobpaths; jobID); .z.P-start
+// 0D00:00:00.002124168
+
+// compare results
+(raze get each h(`.primary.jobpaths; jobID))~raze .task.vwap peach date
+```
+
+3. show the mem used for a single job before and after
+```q
+// check the mem for each task in MB
+h({select[10] taskid, before:`long$membefore%1048576, peak:`long$memafter%1048576, aftergc:`long$memaftergc%1048576 from tasks where jobid=x}; jobID)
+
+// a job that uses 300MB per task, to make it obvious
+jm:h(`.primary.newjob; `hold; 8#enlist `mb`secs!(300;1); ()!())
+h({select taskid, before:`long$membefore%1048576, peak:`long$memafter%1048576, aftergc:`long$memaftergc%1048576 from tasks where jobid=x}; jm)
+/ every task: about 2MB before, about 300MB peak, back to about 2MB after the gc
+```
+
+4. show how to run high priority jobs
+```q
+// a long job: 40 tasks of 3 seconds on 8 secondaries, so most of it is queued, priority 0
+jl:h(`.primary.newjob; `sleep; 40#3; ()!())
+
+// an urgent job, submitted after it, priority 10
+ju:h(`.primary.newjob; `sumtil; 1000 2000 3000; ([priority:10]))
+
+// run on primary, both jobs and their priorities
+select jobid, priority, state, submittedtime, finishedtime from jobs
+```
+
+5. show dispatch pausing above the memory cap and resuming below it
+```q
+// soft cap down to 2GB; the kernel's hard cap stays at 4GB
+h".primary.memcap:2147483648"
+
+// 16 tasks of 300MB, held for 2 to 9 seconds
+jg:h(`.primary.newjob; `hold; ([] mb:16#300; secs:16#2 3 4 5 6 7 8 9); ()!())
+
+// in the primary's terminal, every second or two: the dispatch line shows PAUSED, then running
+.primary.showstatus[]
+
+// how many times it paused, and for how long
+.primary.status[]`dispatch
+
+// soft cap back to 4GB
+.primary.memcap:4294967296
+```
+
+6. show jobs failing, and what the framework does about it
+
+6.1 a task that throws an error: reported, not retried, the job fails
+```q
+je:h(`.primary.newjob; `fail; enlist 0; ()!())
+h({select taskid, state, reason, err, retrycount from tasks where jobid=x}; je)
+```
+
+6.2 a timeout: this job has a 5 second timeout, the secondary is killed and restarted, we give it a sleep 20 so it will timeout. Look at the secondaries start time
+```q
+.primary.tasktimeout
+jt:h(`.primary.newjob; `sleep; enlist 20; ([timeout:00:00:05.000]))
+h({select taskid, state, reason, err, retrycount from tasks where jobid=x}; jt)   / after 5s: timeout 
+```
+
+6.3 out of memory: one part asks for 5GB, over the kernel's 4GB cap
+```q
+jo:.primary.newjob[`hold; ([] mb:(3#100),5000,8#100; secs:12#5); ()!()]
+select taskid, state, reason from tasks where jobid=jo            / part 4 oom, parts 9-12 cancelled, the rest done
+system "cat ",.primary.cgroupdir,"/memory.events"                 / oom_kill 1
+```
+
+6.4 a secondary crashing mid-task: its task is retried, the job still finishes
+```q
+jk:.primary.newjob[ `sleep; 16#3; ()!()]; p:first exec pid from secondaries where status=`busy; system "kill -9 ",string p
+select taskid, state, retrycount from tasks where jobid=jk
+```
+
+after 6.2, 6.3 and 6.4, in the primary's terminal: the killed secondary is back with a new pid and restarts 1
+```q
+.primary.showstatus[]
+```
+
+7. show where the results are, and that they don't need the primary
+```q
+h(`.primary.jobpaths; jobID)          / one file per task, in task order
+h({jobs x}; jobID)                    / resultbytes: the total size before you load it
+paths:h(`.primary.jobpaths; jobID)
+```
+stop the primary (\\ in its terminal), then:
+```q
+(raze get each paths)~raze .task.vwap peach date      / 1b: the results don't need the primary
+```
+
+8. Talking points (no commands)
+- Why not -w:
+  - it's per process, not one global cap;
+  - it counts q's heap, not what the kernel enforces;
+  - '-w abort can't be trapped, and takes every thread's work with it;
+  - a cgroup gives one hard cap, real RSS, and a labelled oom.
+- Soft cap vs hard cap: running tasks overshoot the soft cap, and the cgroup also counts the HDB's page cache. So in real use the hard cap should sit above the soft cap. Section 5 shows why.
+- Priority: every task of a job carries the job's priority; dispatch sends the highest first, then the oldest. A running task is never interrupted, and there's no ageing yet, so a steady stream of urgent work could starve priority 0.
+
+9. What's next
+- From the brief, not done yet:
+  - V2 scheduler: only send a task if its expected size (from the peaks recorded per task type) fits in the headroom left, thinking of doing this with a tasks compairson of peak mem used for same types of tasks
+  - backoff on retries, and quarantine for a secondary that keeps failing
+  - integration tests for the brief's list: happy path, gating, timeout, gc
+- Building on what's there:
+  - one blocking call that waits for a job and returns its paths (deferred reply)
+  - memory per job on the jobs table: its footprint and its biggest task
+  - a soft cap below the hard cap in the start scripts
+  - fairness for priorities: ageing, so low-priority work can't be starved
+  - cheaper /proc reads, and a retention policy for old results
+  - the 30GB run
+- Bigger steps:
+  - secondaries on other machines
+  - starting more secondaries when the queue is deep and there's memory to spare
+  - packaging as a di.parallel module
+
 
 ## To Do
 
 1. add in the global mem cap limit and test with 30GB
 2. add deferred sync so when i run a job form another processes it will block the user until the job is complete
-3. a tidy up of the code (mix of 4 and before dict usages), probably stick things in separate scripts where possible
+3. a tidy up of the code (mix of 4 and before dict usages), probably stick things in separate scripts where possible. Can probably get rid of alot of columns that i dont think i need anymore as well like start/registered time in the secondaries
+4. change the log timestamps to be local time instead of utc, dont know if that is possible since we use a module
+5. fix the start bash scripts to use the mem cap limit and start with a cgroup
+6. Tidy up the readme
+7. add a function to calcualte the mem used for a job and maybe store that data in the jobs table
+8. do we need to run dispatch on a timer does it do naything? Yes for when a secondary crashes with an OOM failure so it can pick up tasks after a restart. It also picks up free tasks if the mem limit is hit once that task is done
 
  

@@ -28,8 +28,8 @@ if[not `primary in key `; system "l src/primary.q"];
     "pjjji" mustmatch exec t from meta memhistory;
    };
   should["have the correct schema for the jobs table"]{
-    (`jobid`tasktype`ntasks`state`submittedtime`finishedtime`resultbytes`err) mustmatch cols jobs;
-    "jsisppj " mustmatch exec t from meta jobs;
+    (`jobid`tasktype`ntasks`priority`state`submittedtime`finishedtime`resultbytes`err) mustmatch cols jobs;
+    "jsiisppj " mustmatch exec t from meta jobs;
    };
  };
 
