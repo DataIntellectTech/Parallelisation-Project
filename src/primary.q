@@ -115,10 +115,10 @@ system"l src/common/cgroup.q";
   -1 "tasks: ",fmt pristatus`taskcounts;
  };
 
-// command line for secondary n, e.g. /opt/kdbx/.../q src/secondary.q -p 45002 -id 2
+// command line for secondary n, e.g. /opt/kdbx/.../q src/secondary.q -id 2
 // look at wrapping in protected execution
 .primary.spawncmd:{[n]
-  " " sv (.primary.qbin; "src/secondary.q"; "-p"; string .primary.baseport+n-1; "-id"; string n)
+  " " sv (.primary.qbin; "src/secondary.q"; "-id"; string n)
  };
 
 // ids taken right now: registered and still connected, or spawned by this primary and still running
@@ -145,7 +145,7 @@ system"l src/common/cgroup.q";
   pid:"I"$first system startcmd;
   .log.info "running system command: ", startcmd;
   .primary.spawned[n]:pid;
-  .log.info "spawned secondary ",string[n]," (pid ",string[pid],") on port ",string .primary.baseport+n-1;
+  .log.info "spawned secondary ",string[n]," (pid ",string[pid],")";
  };
 
 // used to shut down all spawned secondaries
@@ -183,7 +183,7 @@ system"l src/common/cgroup.q";
   tid:.primary.nexttaskid[];
   data:.primary.taskdefaults,task,
     ([taskid:tid; args:enlist task`args; submittedtime:.z.P; retrycount:0i; state:`queued; secondaryid:0N; dispatchedtime:0Np; startedtime:0Np;
-    finishedtime:0Np; membefore:0N; memafter:0N; memaftergc:0N; err:""; reason:`; resultpath:`; resultbytes:0N]);
+    finishedtime:0Np; membefore:0N; memafter:0N; memaftergc:0N; err:""; reason:`; resultpath:`; resultbytes:0N; jobid:0N; user:`]);
   `tasks upsert data;
   .log.info "new task ",string[tid]," ",string task`tasktype;
   tid
@@ -349,10 +349,10 @@ system"l src/common/cgroup.q";
     delete from `tasks where taskid in ids;
     '"could not create every task for the job, see the log"];
   jid:.primary.lastjobid+:1;
-  update jobid:jid from `tasks where taskid in ids;
+  update jobid:jid, user:.z.u from `tasks where taskid in ids;
   pri:params`priority;
-  `jobs upsert (jid; tasktype; `int$count ids; pri; `running; .z.P; 0Np; 0N; "");
-  .log.info "new job ",string[jid],": ",string[count ids]," ",string[tasktype]," tasks (",string[first ids],"..",string[last ids],"), priority ",string pri;
+  `jobs upsert (jid; tasktype; .z.u;`int$count ids; pri; `running; .z.P; 0Np; 0N; "");
+  .log.info "new job ",string[jid]," for ",string[.z.u],": ",string[count ids]," ",string[tasktype]," tasks (",string[first ids],"..",string[last ids],"), priority ",string pri;
   .primary.dispatch[];
   jid
  };

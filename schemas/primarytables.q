@@ -43,7 +43,8 @@ tasks : ([taskid: `long$()]
   reason:         `$();            // `timeout`oom`error`lost`sendfailed
   resultpath:     `$();
   resultbytes:    `long$();
-  jobid:          `long$()
+  jobid:          `long$();
+  user:           `$()
  );
 
 // one row per memory poll, bounded to the last .primary.memhistorymax rows
@@ -58,6 +59,7 @@ memhistory : ([]
 // groups of tasks submitted together; when every part is done their results are combined into one
 jobs : ([jobid: `long$()]
   tasktype:       `$();
+  user:           `$();
   ntasks:         `int$();
   priority:       `int$();
   state:          `$();

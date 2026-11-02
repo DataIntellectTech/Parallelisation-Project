@@ -20,16 +20,16 @@ if[not `primary in key `; system "l src/primary.q"];
     "jiisispjibbpp jjjp" mustmatch exec t from meta secondaries;
    };
   should["have the correct schema for the tasks table"]{
-    (`taskid`tasktype`args`priority`submittedtime`memestimate`timeout`retriesmax`retrycount`state`secondaryid`dispatchedtime`startedtime`finishedtime`membefore`memafter`memaftergc`err`reason`resultpath`resultbytes`jobid) mustmatch cols tasks;
-    "js ipjtiisjpppjjj ssjj" mustmatch exec t from meta tasks;
+    (`taskid`tasktype`args`priority`submittedtime`memestimate`timeout`retriesmax`retrycount`state`secondaryid`dispatchedtime`startedtime`finishedtime`membefore`memafter`memaftergc`err`reason`resultpath`resultbytes`jobid`user) mustmatch cols tasks;
+    "js ipjtiisjpppjjj ssjjs" mustmatch exec t from meta tasks;
    };
   should["have the correct schema for memhistory table"]{
     (`time`total`primary`secondaries`busy) mustmatch cols memhistory;
     "pjjji" mustmatch exec t from meta memhistory;
    };
   should["have the correct schema for the jobs table"]{
-    (`jobid`tasktype`ntasks`priority`state`submittedtime`finishedtime`resultbytes`err) mustmatch cols jobs;
-    "jsiisppj " mustmatch exec t from meta jobs;
+    (`jobid`tasktype`user`ntasks`priority`state`submittedtime`finishedtime`resultbytes`err) mustmatch cols jobs;
+    "jssiisppj " mustmatch exec t from meta jobs;
    };
  };
 

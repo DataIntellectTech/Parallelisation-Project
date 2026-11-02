@@ -21,25 +21,33 @@ FILTER="${1:-}"
 mkdir -p "$LOG_DIR"
 PRIMARYPID=""
 
-# kill the primary and any secondary on the test ports (46001 -> "4600", so 46000-46009 only)
+# kill the test primary and its secondaries
+# secondaries have no port, so they're found by the PRIMARY_PORT they inherited from the test primary;
+# /proc/<pid>/environ is only readable for our own processes, and any other primary's secondaries have a
+# different PRIMARY_PORT, so nothing else is touched
 stopall() {
-  if [[ -n "$PRIMARYPID" ]]; then kill -9 "$PRIMARYPID" 2>/dev/null || true; fi
-  pkill -9 -f "src/secondary.q -p ${SECONDARY_BASE_PORT%?}" 2>/dev/null || true
+  if [[ -n "$PRIMARYPID" ]]; then
+    kill -9 "$PRIMARYPID" 2>/dev/null || true
+    wait "$PRIMARYPID" 2>/dev/null || true      # reap it, so bash doesn't print "Killed"
+  fi
+  local p
+  for p in $(pgrep -f "src/secondary.q"); do
+    if tr '\0' '\n' < "/proc/$p/environ" 2>/dev/null | grep -qx "PRIMARY_PORT=$PRIMARY_PORT"; then
+      kill -9 "$p" 2>/dev/null || true
+    fi
+  done
   PRIMARYPID=""
 }
 
 # used to kill any processes incase script stops early eg. CTRL+C
 trap stopall EXIT
 
-# refuse to start if something is already on the test ports
+# refuse to start if something is already on the test primary's port (secondaries don't listen)
 portsfree() {
-  local p
-  for p in $(seq "$PRIMARY_PORT" $((SECONDARY_BASE_PORT + NUM_SECONDARYS + 1))); do
-    if (exec 3<>"/dev/tcp/localhost/$p") 2>/dev/null; then
-      echo "port $p is already in use; kill whatever is on it (ss -ltnp | grep $p) and rerun" >&2
-      return 1
-    fi
-  done
+  if (exec 3<>"/dev/tcp/localhost/$PRIMARY_PORT") 2>/dev/null; then
+    echo "port $PRIMARY_PORT is already in use; kill whatever is on it (ss -ltnp | grep $PRIMARY_PORT) and rerun" >&2
+    return 1
+  fi
 }
 
 # start the primary in the background and wait until it is listening
@@ -67,7 +75,7 @@ for spec in tests/integration/*_spec.q; do
   if ! startprimary; then rc=1; stopall; continue; fi
   if ! EXTRA_ENV=config/integration.env tests/run.sh "$spec"; then rc=1; fi
   stopall
-  sleep 0.5    # let the ports free up before the next cluster
+  sleep 0.5    # let the processes exit and the primary's port free up before the next spec
 done
 
 echo

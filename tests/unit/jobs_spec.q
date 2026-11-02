@@ -92,6 +92,15 @@ if[not `primary in key `; system "l src/primary.q"];
     0 musteq count jobs;
     0 musteq count tasks;
     };
+  should["record who submitted the job, on the job and on each of its tasks"]{
+    j:.primary.newjob[`sumtil; 10 20; ()!()];
+    .z.u musteq jobs[j]`user;
+    1b musteq all .z.u=exec user from tasks where jobid=j;
+   };
+  should["not let the caller set the user"]{
+    mustthrow[(); {[] .primary.newjob[`sumtil; 10 20; ([user:`someoneelse])]}];
+    0 musteq count jobs;
+   };
  };
 
 .tst.desc[".primary.jobcheck - a job's state follows its tasks"]{
