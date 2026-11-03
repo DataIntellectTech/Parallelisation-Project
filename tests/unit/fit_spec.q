@@ -94,6 +94,19 @@ if[not `primary in key `; system "l src/primary.q"];
     .primary.dispatch[];
     t mustmatch .ut.ftsent;
     };
+  should["see a finished task's memory freed straight away, without waiting for a poll"]{
+    / a 700MB task on secondary 1 and a small one on secondary 2, so a secondary stays busy
+    a:.ut.ftnew 700;
+    .ut.ftnew 10;
+    .primary.dispatch[];
+    / the last poll saw secondary 1 at 700MB while its task ran
+    update rssanon:700*.ut.ftmb from `secondaries where id=1;
+    b:.ut.ftnew 400;
+    / secondary 1 finishes and reports 2MB after its gc: 400 now fits, and goes at once
+    .primary.taskupdate[a;`running;()!()];
+    .primary.taskupdate[a;`done;([resultpath:`; resultbytes:0; membefore:0; memafter:0; memaftergc:2*.ut.ftmb])];
+    1b musteq b in .ut.ftsent;
+    };
  };
 
 .tst.desc[".primary.committedmem"]{
