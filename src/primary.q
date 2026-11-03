@@ -230,16 +230,49 @@ system"l src/common/cgroup.q";
   .log.info "sent task ",string[tid]," to secondary ",string[sid]," to run task ",string t`tasktype;
  };
 
+// Claude
+// memory in use, or about to be, in bytes: the primary, plus each live secondary's current memory (rssanon) or,
+// for a busy one, its task's estimate if that's more: a task that has just started hasn't grown yet
+// before the first memory poll, the primary's own figure is unknown (0N), so it counts as 0
+.primary.committedmem:{
+  s:select rssanon, currenttask from secondaries where status<>`closed;
+  // each secondary's current task's estimate; 0 for a free secondary or a task with no estimate
+  taskest:0^(exec taskid!memestimate from tasks) s`currenttask;
+  (0^.primary.selfmem) + sum (0^s`rssanon)|taskest
+ };
+
+// Claude with edits from me
+// which of the queued tasks to send now: at most n of qtasks (already in dispatch order), each only if its
+// memestimate fits in the memory left under the cap; what's sent is reserved, so one dispatch can't hand out
+// the same headroom twice. A task that doesn't fit waits and a smaller one behind it can go; a task with no
+// estimate always goes (it's how a new task type is learnt). With no cap set, the first n go as before
+.primary.fit:{[qtasks; n]
+  if[null .primary.memcap; :n sublist qtasks];
+  headroom:.primary.memcap-.primary.committedmem[];
+  taskest:0^(exec taskid!memestimate from tasks) qtasks;
+  // nothing running: send the first task whatever its estimate, so it can't wait for ever on the secondaries'
+  // own baseline memory
+  if[not count select from secondaries where status=`busy; headroom:headroom|first taskest];
+  // the headroom left after each task: one that fits uses up its estimate, one that doesn't leaves it unchanged
+  left:headroom {[room;est] $[est<=room; room-est; room]}\ taskest;
+  // a task fits if its estimate is within what was left before it
+  fits:taskest<=headroom,-1_left;
+  n sublist qtasks where fits
+ };
+
 // hand a queued task to a secondary, do it by priority then by oldest first
 // will run on a timer every 1 sec
 .primary.dispatch:{
   freesec: exec id from secondaries where status=`free;
   if[not count freesec; :()];
   qtasks: exec taskid from `priority xdesc select taskid, priority from 0!tasks where state=`queued;
-  n:min count[freesec], count qtasks;
-  if[n=0; :()];
+  if[not count qtasks; :()];
   // the memory gate: send nothing new while total memory is over the cap
   if[.primary.overcap[]; :()];
+  // V2: only the tasks whose estimates fit in what's left under the cap
+  qtasks:.primary.fit[qtasks; count freesec];
+  n:min count[freesec], count qtasks;
+  if[n=0; :()];
   .primary.sendtask'[n#freesec; n#qtasks];
  };
 
@@ -446,7 +479,7 @@ system"l src/common/cgroup.q";
   // (only reached when the cap has since been raised, otherwise the job was refused above)
   killedat:exec max memafter from seen where reason=`oom, not null memafter;
   if[not null killedat; estimate:estimate|killedat];
-  
+
   ([estimate:estimate; run:1b; reason:""])
  };
 
