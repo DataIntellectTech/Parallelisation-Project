@@ -442,6 +442,11 @@ system"l src/common/cgroup.q";
         " args were killed for memory before, under a ",.primary.mb[max kills`memafter]," cap (e.g. ",(-3!first first kills`args),
         "); the cap is ",.primary.mb .primary.memcap])]];
 
+  // args killed for memory before needed at least the cap they hit: never estimate them below it
+  // (only reached when the cap has since been raised, otherwise the job was refused above)
+  killedat:exec max memafter from seen where reason=`oom, not null memafter;
+  if[not null killedat; estimate:estimate|killedat];
+  
   ([estimate:estimate; run:1b; reason:""])
  };
 

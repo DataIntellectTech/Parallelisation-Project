@@ -380,6 +380,12 @@ if[not `primary in key `; system "l src/primary.q"];
     0b musteq .primary.estimatemem[`hold; ([] mb:30 5000; secs:1 5)]`run;
     1b musteq .primary.estimatemem[`hold; enlist `mb`secs!(30;1)]`run;
     };
+  should["estimate killed args at least at the cap they were killed under, once allowed"]{
+    .ut.esdone[`sumtil; enlist 10; enlist 100];
+    .ut.esoom[`sumtil; 50; 1000];
+    `.primary.memcap mock 2000*.ut.esmb;
+    (1000*.ut.esmb) musteq .primary.estimatemem[`sumtil; enlist 50]`estimate;
+   };
  };
 
 .tst.desc[".primary.newjob - the memory estimate"]{
@@ -407,3 +413,4 @@ if[not `primary in key `; system "l src/primary.q"];
     1b musteq all (5*.ut.esmb)=exec memestimate from tasks where jobid=j;
     };
  };
+
