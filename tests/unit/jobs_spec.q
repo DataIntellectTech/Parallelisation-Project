@@ -306,3 +306,104 @@ if[not `primary in key `; system "l src/primary.q"];
     (a,b) mustmatch .ut.jbsent;
     };
  };
+
+.ut.esmb:1048576;
+
+/ history: a job of tt with args, each task finished done having used usedmb MB (membefore 1MB, memafter 1MB+used)
+.ut.esdone:{[tt;args;usedmb]
+  t:.ut.jbtids .primary.newjob[tt; args; ()!()];
+  {[t;u] .ut.jbrun t; .primary.taskupdate[t;`done;([resultpath:`; resultbytes:0; membefore:.ut.esmb; memafter:.ut.esmb*1+u])]}'[t;usedmb];
+  t
+ };
+
+/ history: a task of tt with arg killed for memory under a cap of capmb MB (memafter holds the cap, as .z.pc sets it)
+.ut.esoom:{[tt;arg;capmb]
+  t:first .ut.jbtids .primary.newjob[tt; enlist arg; ()!()];
+  .ut.jbrun t;
+  .primary.taskupdate[t;`failed;([err:"killed"; reason:`oom; memafter:capmb*.ut.esmb])];
+  t
+ };
+
+/ the job mocks, with hold allowed and a 1000MB cap
+.ut.esmocks:{[]
+  .ut.jbmocks[];
+  .tst.mock[`.primary.tasktypes; `sumtil`sleep`fail`hold];
+  .tst.mock[`.primary.memcap; 1000*.ut.esmb];
+ };
+
+.tst.desc[".primary.estimatemem"]{
+  before{
+    .ut.esmocks[];
+    .ut.jbreset[];
+    };
+  after{
+    system "rm -rf ",.ut.jbdir;
+    };
+  should["let a task type with no history run, with no estimate"]{
+    e:.primary.estimatemem[`sumtil; 10 20];
+    1b musteq e`run;
+    1b musteq null e`estimate;
+    };
+  should["estimate the most any done task of the type used"]{
+    .ut.esdone[`sumtil; 10 20; 100 300];
+    e:.primary.estimatemem[`sumtil; enlist 99];
+    (300*.ut.esmb) musteq e`estimate;
+    1b musteq e`run;
+    };
+  should["refuse when the type's estimate is at or over the cap"]{
+    .ut.esdone[`sumtil; enlist 10; enlist 1000];
+    0b musteq .primary.estimatemem[`sumtil; enlist 99]`run;
+    };
+  should["refuse a job that includes an arg killed for memory under the current cap"]{
+    .ut.esoom[`sumtil; 50; 1000];
+    e:.primary.estimatemem[`sumtil; 10 50 90];
+    0b musteq e`run;
+    1b musteq e[`reason] like "*killed for memory*";
+    };
+  should["let a job run when none of its args were killed"]{
+    .ut.esoom[`sumtil; 50; 1000];
+    1b musteq .primary.estimatemem[`sumtil; 10 90]`run;
+    };
+  should["let the killed arg run again once the cap is raised above the one it was killed under"]{
+    .ut.esoom[`sumtil; 50; 1000];
+    `.primary.memcap mock 2000*.ut.esmb;
+    1b musteq .primary.estimatemem[`sumtil; enlist 50]`run;
+    };
+  should["refuse nothing when there is no cap"]{
+    .ut.esoom[`sumtil; 50; 1000];
+    .ut.esdone[`sumtil; enlist 10; enlist 5000];
+    `.primary.memcap mock 0N;
+    1b musteq .primary.estimatemem[`sumtil; enlist 50]`run;
+    };
+  should["match dict args, as hold uses"]{
+    .ut.esoom[`hold; `mb`secs!(5000;5); 1000];
+    0b musteq .primary.estimatemem[`hold; ([] mb:30 5000; secs:1 5)]`run;
+    1b musteq .primary.estimatemem[`hold; enlist `mb`secs!(30;1)]`run;
+    };
+ };
+
+.tst.desc[".primary.newjob - the memory estimate"]{
+  before{
+    .ut.esmocks[];
+    .ut.jbreset[];
+    };
+  after{
+    system "rm -rf ",.ut.jbdir;
+    };
+  should["refuse a job that can't run, and create nothing"]{
+    .ut.esoom[`sumtil; 50; 1000];
+    n:count tasks;
+    mustthrow[(); {[] .primary.newjob[`sumtil; 10 50; ()!()]}];
+    n musteq count tasks;
+    };
+  should["store the estimate on every task of the job"]{
+    .ut.esdone[`sumtil; 10 20; 100 300];
+    j:.primary.newjob[`sumtil; 30 40; ()!()];
+    1b musteq all (300*.ut.esmb)=exec memestimate from tasks where jobid=j;
+    };
+  should["keep the caller's memestimate when one is given"]{
+    .ut.esdone[`sumtil; 10 20; 100 300];
+    j:.primary.newjob[`sumtil; 30 40; ([memestimate:5*.ut.esmb])];
+    1b musteq all (5*.ut.esmb)=exec memestimate from tasks where jobid=j;
+    };
+ };

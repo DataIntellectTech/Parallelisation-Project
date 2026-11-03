@@ -335,7 +335,6 @@ system"l src/common/cgroup.q";
   1b
  };
 
-.primary.taskdefaults:([priority:0i; memestimate: 0N; timeout: .primary.tasktimeout; retriesmax: .primary.taskretries]);
 // splits a job up into individual tasks
 // .primary.newjob[`vwap; 2026.01.01 2026.01.02 2026.01.03; ([priority:1])]
 // .primary.newjob[`vwap; 2026.01.01 2026.01.02 2026.01.03; ()!()]
@@ -344,6 +343,11 @@ system"l src/common/cgroup.q";
   if[not count args; '"no args: a job needs at least one task"];
   if[not all key[params] in key .primary.taskdefaults; '"optional parasm are: ",", " sv string key .primary.taskdefaults];
   params:@[.primary.taskdefaults, params; `priority`retriesmax; `int$];
+  est:.primary.estimatemem[tasktype; args];
+  if[not est`run;
+    .log.warn "job refused for ",string[.z.u],": ",est`reason;
+    '"job refused: ",est`reason];
+  if[null params`memestimate; params[`memestimate]:est`estimate];
   ids:.primary.newtask each {y,([tasktype: x; args: z])}[tasktype;params] each args;
   if[any null ids;
     delete from `tasks where taskid in ids;
@@ -392,6 +396,55 @@ system"l src/common/cgroup.q";
   exec resultpath from tasks where jobid = jid, not null resultpath
  };
 
+// Claude
+// what earlier tasks say about a job of ttype with jobargs, checked for the whole job at once
+// ttype:   the job's task type, e.g. `vwap (not called tasktype: inside q-sql the column would win)
+// jobargs: the job's args, one per task (a list, or a table with one row per task)
+// 1. the task type: the estimate is the most any successful task of this type has used; refused if that's
+//    at or over the cap, as such a job could never fit
+// 2. the args: earlier tasks given any of this job's args; refused if any of them was killed for memory under
+//    a cap at least as high as now (raising the cap lets it run again)
+// returns ([estimate: bytes, 0N if nothing is known; run: 1b if the job can run; reason: "" or why not])
+// history is the tasks table, so it is in memory only and starts empty when the primary restarts
+.primary.estimatemem:{[ttype; jobargs]
+  // every finished task of this type; peak minus before is what the task used
+  // args stay boxed as stored (enlisted); unboxing a list of dicts in the select turns it into a table, which breaks in
+  history:0!select args, reason, state, memused:memafter-membefore, memafter
+    from tasks where tasktype=ttype, state in `done`failed;
+
+  // first time this type has been run: nothing to go on, so let it run and learn from it
+  if[not count history;
+    .log.info "no history for ",string[ttype]," tasks yet, running without an estimate";
+    :([estimate:0N; run:1b; reason:""])];
+
+  // 1. the task type: the most any successful task of this type has used
+  // (max of an empty list is -0W in q, not null, so check there are some first)
+  used:exec memused from history where state=`done, not null memused;
+  estimate:$[count used; max used; 0N];
+  if[(not null estimate) and (not null .primary.memcap) and estimate>=.primary.memcap;
+    :([estimate:estimate; run:0b; reason:string[ttype]," tasks need about ",.primary.mb[estimate],
+      ", at or over the cap of ",.primary.mb .primary.memcap])];
+
+  // 2. the args: earlier tasks given any of this job's args, all compared in one go
+  // each arg is compared as its serialised bytes (-8!), which works for any kind of arg: dates, numbers, lists,
+  // and dicts as hold uses. first unboxes the stored args; -8!' goes item by item, or row by row for a table of args
+  history:update argbytes:-8!'first each args from history;
+  seen:select from history where argbytes in -8!'jobargs;
+  if[not count seen;
+    .log.info "none of this job's ",string[ttype]," args have run before";
+    :([estimate:estimate; run:1b; reason:""])];
+
+  // any of them killed for memory under a cap at least as high as now? memafter is that cap (set in .z.pc)
+  if[not null .primary.memcap;
+    kills:select from seen where reason=`oom, not null memafter, memafter>=.primary.memcap;
+    if[count kills;
+      :([estimate:estimate; run:0b; reason:string[count distinct kills`argbytes]," of this job's ",string[ttype],
+        " args were killed for memory before, under a ",.primary.mb[max kills`memafter]," cap (e.g. ",(-3!first first kills`args),
+        "); the cap is ",.primary.mb .primary.memcap])]];
+
+  ([estimate:estimate; run:1b; reason:""])
+ };
+
 // if a connection is close we need to mark it as closed
 // we will now restart a secondary if it is closed and under .primary.respawnsmax
 .z.pc:{[h]
@@ -402,7 +455,7 @@ system"l src/common/cgroup.q";
   oom:$[null secid; 0b; .primary.oomkilled[]];
   .log.info "secondary ",string[secid]," has closed its connection to the primary",$[oom; ": killed by the kernel for using too much memory"; ""];
   if[not null tid;
-    r:$[oom; ([err:"secondary killed by the kernel for using too much memory"; reason:`oom]); ([err:"secondary lost"; reason:`lost])];
+    r:$[oom; ([err:"secondary killed by the kernel for using too much memory"; reason:`oom; memafter:.primary.memcap]); ([err:"secondary lost"; reason:`lost])];
     .primary.taskupdate[tid; `failed; r];
     .log.warn "task ",string[tid]," was on secondary ",string[secid],", marking it as failed (",string[r`reason],")"];
   .primary.respawnsecondary secid;

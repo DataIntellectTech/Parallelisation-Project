@@ -37,7 +37,7 @@ tasks : ([taskid: `long$()]
   startedtime:    `timestamp$();
   finishedtime:   `timestamp$();
   membefore:      `long$();        // RssAnon before running 
-  memafter:       `long$();        // peak during the task VmHWN
+  memafter:       `long$();        // peak during the task VmHWN; or a task killed for memory, the cap it was killed under
   memaftergc:     `long$();        // RssAnon after the task ends and .Q.gc
   err:            (); 
   reason:         `$();            // `timeout`oom`error`lost`sendfailed
