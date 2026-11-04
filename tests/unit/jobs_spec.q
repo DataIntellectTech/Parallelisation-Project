@@ -1,0 +1,416 @@
+/ unit specs for jobs: .primary.newjob, .primary.jobcheck (via taskupdate), .primary.canceljob and .primary.jobpaths
+/ loads primary.q once (spawning off). No secondaries are registered, so nothing is dispatched: each test moves a
+/ job's tasks through their states with .primary.taskupdate, as a secondary would, and saves results by hand
+/ run: tests/run.sh tests/unit/jobs_spec.q
+
+setenv[`SPAWN_SECONDARY;enlist "0"];
+if[not `primary in key `; system "l src/primary.q"];
+
+.ut.jbdir:"/tmp/qfw-jobs-spec";
+
+/ fresh tables from the schema and an empty results folder
+.ut.jbreset:{[]
+  system "l schemas/primarytables.q";
+  .primary.lasttaskid:0;
+  system "rm -rf ",.ut.jbdir;
+  system "mkdir -p ",.ut.jbdir;
+ };
+
+/ a job of n sumtil tasks with 3 retries each, returns the job id
+.ut.jbnew:{[n]
+  j:.primary.newjob[`sumtil; 10*1+til n; ()!()];
+  update retriesmax:3i from `tasks where jobid=j;
+  j
+ };
+
+/ the task ids of job j, in order
+.ut.jbtids:{[j] exec taskid from tasks where jobid=j};
+
+/ move a queued task to running, as dispatch and the secondary would
+.ut.jbrun:{[tid]
+  .primary.taskupdate[tid;`dispatched;()!()];
+  .primary.taskupdate[tid;`running;()!()];
+ };
+
+/ finish a task as done with result r saved on disk (r is :: for no result)
+.ut.jbdone:{[tid;r]
+  if[`queued~tasks[tid]`state; .ut.jbrun tid];
+  p:$[(::)~r; `; [p:hsym `$.ut.jbdir,"/",string tid; p set r; p]];
+  .primary.taskupdate[tid;`done;([resultpath:p; resultbytes:$[null p; 0; hcount p]; membefore:0; memafter:0])];
+ };
+
+/ fail a task with reason rsn
+.ut.jbfail:{[tid;rsn]
+  if[`queued~tasks[tid]`state; .ut.jbrun tid];
+  .primary.taskupdate[tid;`failed;([err:"boom"; reason:rsn; membefore:0; memafter:0])];
+ };
+
+/ logs silenced except jobcheck's "job N failed: ..." warnings, which are counted
+/ KDB-X like throws 'nyi for a * in the middle of a pattern, so match with two patterns that only use * at the ends
+.ut.jbmocks:{[]
+  .tst.mock[`.log.info; {[x] ::}];
+  `.ut.jbfails set 0;
+  .tst.mock[`.log.warn; {[x] if[(x like "job*") and x like "*failed:*"; .ut.jbfails+:1]}];
+  .tst.mock[`.primary.tasktypes; `sumtil`sleep`fail];
+  .tst.mock[`.primary.retryreasons; `lost`sendfailed];
+  .tst.mock[`.primary.memcap; 0N];
+  .tst.mock[`.primary.lastjobid; 0];
+ };
+
+.tst.desc[".primary.newjob"]{
+  before{
+    .ut.jbmocks[];
+    .ut.jbreset[];
+    };
+  after{
+    system "rm -rf ",.ut.jbdir;
+    };
+  should["create one task per arg, all with the job's id"]{
+    j:.primary.newjob[`sumtil; 10 20 30; ()!()];
+    3 musteq count .ut.jbtids j;
+    1b musteq all j=exec jobid from tasks;
+    };
+  should["give each task its own arg, in order"]{
+    j:.primary.newjob[`sumtil; 10 20 30; ()!()];
+    10 20 30 mustmatch exec first each args from tasks where jobid=j;
+    };
+  should["add the job as running with its number of tasks"]{
+    j:.primary.newjob[`sumtil; 10 20 30; ()!()];
+    (`running;3i) mustmatch jobs[j]`state`ntasks;
+    1b musteq not null jobs[j]`submittedtime;
+    };
+  should["give each job the next id"]{
+    1 2 mustmatch {[x] .primary.newjob[`sumtil; 1 2; ()!()]} each 1 2;
+    };
+  should["error for an unknown task type and create nothing"]{
+    mustthrow[(); {[] .primary.newjob[`nope; 1 2; ()!()]}];
+    0 musteq count jobs;
+    0 musteq count tasks;
+    };
+  should["error for no args and create nothing"]{
+    mustthrow[(); {[] .primary.newjob[`sumtil; (); ()!()]}];
+    0 musteq count jobs;
+    0 musteq count tasks;
+    };
+  should["record who submitted the job, on the job and on each of its tasks"]{
+    j:.primary.newjob[`sumtil; 10 20; ()!()];
+    .z.u musteq jobs[j]`user;
+    1b musteq all .z.u=exec user from tasks where jobid=j;
+   };
+  should["not let the caller set the user"]{
+    mustthrow[(); {[] .primary.newjob[`sumtil; 10 20; ([user:`someoneelse])]}];
+    0 musteq count jobs;
+   };
+ };
+
+.tst.desc[".primary.jobcheck - a job's state follows its tasks"]{
+  before{
+    .ut.jbmocks[];
+    .ut.jbreset[];
+    };
+  after{
+    system "rm -rf ",.ut.jbdir;
+    };
+  should["leave the job running while some parts are not done"]{
+    j:.ut.jbnew 3;
+    .ut.jbdone[first .ut.jbtids j; 1];
+    `running musteq jobs[j]`state;
+    };
+  should["mark the job done when every part is done, with the total result size"]{
+    j:.ut.jbnew 3;
+    .ut.jbdone[;1] each .ut.jbtids j;
+    `done musteq jobs[j]`state;
+    1b musteq not null jobs[j]`finishedtime;
+    (exec sum resultbytes from tasks where jobid=j) musteq jobs[j]`resultbytes;
+    };
+  should["mark the job failed when a part fails for good, naming the part"]{
+    j:.ut.jbnew 3;
+    t:.ut.jbtids j;
+    .ut.jbfail[t 1; `error];
+    `failed musteq jobs[j]`state;
+    1b musteq jobs[j][`err] like "task ",string[t 1]," failed (error)*";
+    1 musteq .ut.jbfails;
+    };
+  should["keep the job running when a lost part is retried"]{
+    j:.ut.jbnew 3;
+    t:.ut.jbtids j;
+    .ut.jbfail[first t; `lost];
+    `queued musteq tasks[first t]`state;
+    `running musteq jobs[j]`state;
+    };
+  should["finish the job done after a lost part is retried and succeeds"]{
+    j:.ut.jbnew 2;
+    t:.ut.jbtids j;
+    .ut.jbfail[first t; `lost];
+    .ut.jbdone[;1] each t;
+    `done musteq jobs[j]`state;
+    };
+  should["not change a failed job when its other parts finish"]{
+    j:.ut.jbnew 3;
+    t:.ut.jbtids j;
+    .ut.jbrun t 1;
+    .ut.jbfail[first t; `error];
+    .ut.jbdone[t 1; 1];
+    `failed musteq jobs[j]`state;
+    1 musteq .ut.jbfails;
+    };
+  should["leave jobs alone for a task submitted on its own"]{
+    `.ut.jbtid set .primary.newtask `tasktype`args!(`sumtil;10);
+    mustnotthrow[(); {[] .ut.jbdone[.ut.jbtid;1]}];
+    0 musteq count jobs;
+    };
+ };
+
+.tst.desc[".primary.canceljob - the rest of a failed job"]{
+  before{
+    .ut.jbmocks[];
+    .ut.jbreset[];
+    };
+  after{
+    system "rm -rf ",.ut.jbdir;
+    };
+  should["cancel the queued parts when a part fails"]{
+    j:.ut.jbnew 4;
+    t:.ut.jbtids j;
+    .ut.jbfail[first t; `error];
+    `failed`failed`failed mustmatch tasks[([] taskid:1_t)]`state;
+    `cancelled`cancelled`cancelled mustmatch tasks[([] taskid:1_t)]`reason;
+    };
+  should["leave a part that is already running alone"]{
+    j:.ut.jbnew 3;
+    t:.ut.jbtids j;
+    .ut.jbrun t 1;
+    .ut.jbfail[first t; `error];
+    `running musteq tasks[t 1]`state;
+    `failed musteq tasks[t 2]`state;
+    };
+  should["not retry cancelled parts"]{
+    j:.ut.jbnew 3;
+    t:.ut.jbtids j;
+    .ut.jbfail[first t; `error];
+    1b musteq all 0i=exec retrycount from tasks where jobid=j;
+    };
+ };
+
+.tst.desc[".primary.jobpaths"]{
+  before{
+    .ut.jbmocks[];
+    .ut.jbreset[];
+    };
+  after{
+    system "rm -rf ",.ut.jbdir;
+    };
+  should["give the parts' result files in task order"]{
+    j:.ut.jbnew 3;
+    t:.ut.jbtids j;
+    .ut.jbdone[;1] each t;
+    ({hsym `$.ut.jbdir,"/",string x} each t) mustmatch .primary.jobpaths j;
+    };
+  should["combine to the parts' results in task order, whatever order they finished in"]{
+    j:.ut.jbnew 3;
+    t:.ut.jbtids j;
+    .ut.jbdone'[reverse t; (5 6;3 4;1 2)];
+    1 2 3 4 5 6 mustmatch raze get each .primary.jobpaths j;
+    };
+  should["combine tables into one table"]{
+    j:.ut.jbnew 2;
+    t:.ut.jbtids j;
+    .ut.jbdone'[t; (([] a:1 2); ([] a:3 4))];
+    ([] a:1 2 3 4) mustmatch raze get each .primary.jobpaths j;
+    };
+  should["leave out parts that returned no result"]{
+    j:.ut.jbnew 3;
+    t:.ut.jbtids j;
+    .ut.jbdone'[t; (1 2;::;3 4)];
+    2 musteq count .primary.jobpaths j;
+    1 2 3 4 mustmatch raze get each .primary.jobpaths j;
+    };
+  should["error for a job that isn't done"]{
+    `.ut.jbj set .ut.jbnew 2;
+    mustthrow[(); {[] .primary.jobpaths .ut.jbj}];
+    };
+  should["error for a failed job"]{
+    `.ut.jbj set .ut.jbnew 2;
+    .ut.jbfail[first .ut.jbtids .ut.jbj; `error];
+    mustthrow[(); {[] .primary.jobpaths .ut.jbj}];
+    };
+  should["error for a job that doesn't exist"]{
+    mustthrow[(); {[] .primary.jobpaths 99}];
+    };
+ };
+
+.tst.desc[".primary.newjob - params"]{
+  before{
+    .ut.jbmocks[];
+    .ut.jbreset[];
+    };
+  after{
+    system "rm -rf ",.ut.jbdir;
+    };
+  should["give every task the job's params"]{
+    j:.primary.newjob[`sumtil; 10 20; ([priority:5i; timeout:00:00:05.000; retriesmax:1i])];
+    5 5i mustmatch exec priority from tasks where jobid=j;
+    1b musteq all 00:00:05.000=exec timeout from tasks where jobid=j;
+    1 1i mustmatch exec retriesmax from tasks where jobid=j;
+    };
+  should["record the job's priority"]{
+    j:.primary.newjob[`sumtil; 10 20; ([priority:5i])];
+    5i musteq jobs[j]`priority;
+    };
+  should["use the defaults when there are no params"]{
+    j:.primary.newjob[`sumtil; 10 20; ()!()];
+    (.primary.taskdefaults`priority) musteq jobs[j]`priority;
+    1b musteq all .primary.tasktimeout=exec timeout from tasks where jobid=j;
+    };
+  should["accept a priority given as a long"]{
+    j:.primary.newjob[`sumtil; 10 20; ([priority:7])];
+    7 7i mustmatch exec priority from tasks where jobid=j;
+    7i musteq jobs[j]`priority;
+    };
+  should["error for an unknown param and create nothing"]{
+    mustthrow[(); {[] .primary.newjob[`sumtil; 10 20; ([prioirty:5])]}];
+    0 musteq count jobs;
+    0 musteq count tasks;
+    };
+ };
+
+/ finish a task that has been sent: running, then done with no result file
+.ut.jbfinish:{[tid]
+  .primary.taskupdate[tid;`running;()!()];
+  .primary.taskupdate[tid;`done;([resultpath:`; resultbytes:0; membefore:0; memafter:0])];
+ };
+
+.tst.desc["priority: a later, higher-priority job goes ahead of an earlier one"]{
+  before{
+    .ut.jbmocks[];
+    .ut.jbreset[];
+    / record the order tasks are sent in; one secondary on handle 0i, so sends run here
+    `.ut.jbsent set `long$();
+    .tst.mock[`.secondary.runtask; {[tid;tt;a] .ut.jbsent,:tid}];
+    .primary.register `id`pid`host`port!(1;101i;`localhost;45001i);
+    };
+  after{
+    system "rm -rf ",.ut.jbdir;
+    };
+  should["send the high-priority job's tasks next, then the rest of the earlier job"]{
+    lo:.ut.jbtids .primary.newjob[`sumtil; 10 20 30; ()!()];
+    hi:.ut.jbtids .primary.newjob[`sumtil; 40 50; ([priority:10])];
+    / the first low task went straight away; each finish frees the secondary and sends the next
+    do[4; .ut.jbfinish last .ut.jbsent];
+    ((first lo),hi,1_lo) mustmatch .ut.jbsent;
+    };
+  should["keep tasks of the same priority in the order they were submitted"]{
+    a:.ut.jbtids .primary.newjob[`sumtil; 10 20; ()!()];
+    b:.ut.jbtids .primary.newjob[`sumtil; 30 40; ()!()];
+    do[3; .ut.jbfinish last .ut.jbsent];
+    (a,b) mustmatch .ut.jbsent;
+    };
+ };
+
+.ut.esmb:1048576;
+
+/ history: a job of tt with args, each task finished done having used usedmb MB (membefore 1MB, memafter 1MB+used)
+.ut.esdone:{[tt;args;usedmb]
+  t:.ut.jbtids .primary.newjob[tt; args; ()!()];
+  {[t;u] .ut.jbrun t; .primary.taskupdate[t;`done;([resultpath:`; resultbytes:0; membefore:.ut.esmb; memafter:.ut.esmb*1+u])]}'[t;usedmb];
+  t
+ };
+
+/ history: a task of tt with arg killed for memory under a cap of capmb MB (memafter holds the cap, as .z.pc sets it)
+.ut.esoom:{[tt;arg;capmb]
+  t:first .ut.jbtids .primary.newjob[tt; enlist arg; ()!()];
+  .ut.jbrun t;
+  .primary.taskupdate[t;`failed;([err:"killed"; reason:`oom; memafter:capmb*.ut.esmb])];
+  t
+ };
+
+/ the job mocks, with hold allowed and a 1000MB cap
+.ut.esmocks:{[]
+  .ut.jbmocks[];
+  .tst.mock[`.primary.tasktypes; `sumtil`sleep`fail`hold];
+  .tst.mock[`.primary.memcap; 1000*.ut.esmb];
+ };
+
+.tst.desc[".primary.estimatemem"]{
+  before{
+    .ut.esmocks[];
+    .ut.jbreset[];
+    };
+  after{
+    system "rm -rf ",.ut.jbdir;
+    };
+  should["let a task type with no history run, with no estimate"]{
+    e:.primary.estimatemem[`sumtil; 10 20];
+    1b musteq e`run;
+    1b musteq null e`estimate;
+    };
+  should["estimate the most any done task of the type used"]{
+    .ut.esdone[`sumtil; 10 20; 100 300];
+    e:.primary.estimatemem[`sumtil; enlist 99];
+    (300*.ut.esmb) musteq e`estimate;
+    1b musteq e`run;
+    };
+  should["refuse when the type's estimate is at or over the cap"]{
+    .ut.esdone[`sumtil; enlist 10; enlist 1000];
+    0b musteq .primary.estimatemem[`sumtil; enlist 99]`run;
+    };
+  should["refuse a job that includes an arg killed for memory under the current cap"]{
+    .ut.esoom[`sumtil; 50; 1000];
+    e:.primary.estimatemem[`sumtil; 10 50 90];
+    0b musteq e`run;
+    1b musteq e[`reason] like "*killed for memory*";
+    };
+  should["let a job run when none of its args were killed"]{
+    .ut.esoom[`sumtil; 50; 1000];
+    1b musteq .primary.estimatemem[`sumtil; 10 90]`run;
+    };
+  should["let the killed arg run again once the cap is raised above the one it was killed under"]{
+    .ut.esoom[`sumtil; 50; 1000];
+    `.primary.memcap mock 2000*.ut.esmb;
+    1b musteq .primary.estimatemem[`sumtil; enlist 50]`run;
+    };
+  should["refuse nothing when there is no cap"]{
+    .ut.esoom[`sumtil; 50; 1000];
+    .ut.esdone[`sumtil; enlist 10; enlist 5000];
+    `.primary.memcap mock 0N;
+    1b musteq .primary.estimatemem[`sumtil; enlist 50]`run;
+    };
+  should["match dict args, as hold uses"]{
+    .ut.esoom[`hold; `mb`secs!(5000;5); 1000];
+    0b musteq .primary.estimatemem[`hold; ([] mb:30 5000; secs:1 5)]`run;
+    1b musteq .primary.estimatemem[`hold; enlist `mb`secs!(30;1)]`run;
+    };
+  should["estimate killed args at least at the cap they were killed under, once allowed"]{
+    .ut.esdone[`sumtil; enlist 10; enlist 100];
+    .ut.esoom[`sumtil; 50; 1000];
+    `.primary.memcap mock 2000*.ut.esmb;
+    (1000*.ut.esmb) musteq .primary.estimatemem[`sumtil; enlist 50]`estimate;
+   };
+ };
+
+.tst.desc[".primary.newjob - the memory estimate"]{
+  before{
+    .ut.esmocks[];
+    .ut.jbreset[];
+    };
+  after{
+    system "rm -rf ",.ut.jbdir;
+    };
+  should["refuse a job that can't run, and create nothing"]{
+    .ut.esoom[`sumtil; 50; 1000];
+    n:count tasks;
+    mustthrow[(); {[] .primary.newjob[`sumtil; 10 50; ()!()]}];
+    n musteq count tasks;
+    };
+  should["store the estimate on every task of the job"]{
+    .ut.esdone[`sumtil; 10 20; 100 300];
+    j:.primary.newjob[`sumtil; 30 40; ()!()];
+    1b musteq all (300*.ut.esmb)=exec memestimate from tasks where jobid=j;
+    };
+  should["keep the caller's memestimate when one is given"]{
+    .ut.esdone[`sumtil; 10 20; 100 300];
+    j:.primary.newjob[`sumtil; 30 40; ([memestimate:5*.ut.esmb])];
+    1b musteq all (5*.ut.esmb)=exec memestimate from tasks where jobid=j;
+    };
+ };
+
