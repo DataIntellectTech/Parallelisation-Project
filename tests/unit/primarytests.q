@@ -16,8 +16,8 @@ if[not `primary in key `; system "l src/primary.q"];
     system "l schemas/primarytables.q";
    };
   should["have the correct schema for secondaries table"]{
-     (`id`handle`pid`host`status`lastheartbeat`lastmembytes`consecutivefails`healthy`spawned`starttime`registeredtime`tasktypes`currenttask`rssanon`vmrss`memtime) mustmatch cols secondaries;
-    "jiisspjibbpp jjjp" mustmatch exec t from meta secondaries;
+     (`id`handle`pid`host`status`lastheartbeat`consecutivefails`healthy`spawned`starttime`registeredtime`tasktypes`currenttask`rssanon`vmrss`memtime) mustmatch cols secondaries;
+    "jiisspibbpp jjjp" mustmatch exec t from meta secondaries;
    };
   should["have the correct schema for the tasks table"]{
     (`taskid`tasktype`args`priority`submittedtime`memestimate`timeout`retriesmax`retrycount`state`secondaryid`dispatchedtime`startedtime`finishedtime`membefore`memafter`memaftergc`err`reason`resultpath`resultbytes`jobid`user) mustmatch cols tasks;
@@ -71,7 +71,7 @@ if[not `primary in key `; system "l src/primary.q"];
     `free musteq first exec status from secondaries where id = 1;
    };
   should["have memory as 100"]{
-    100 musteq first exec lastmembytes from secondaries where id = 1;
+    100 musteq first exec rssanon from secondaries where id = 1;
    };
  };
 

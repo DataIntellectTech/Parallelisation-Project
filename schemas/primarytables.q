@@ -7,7 +7,6 @@ secondaries : ([id: `long$()]
   host:             `$();
   status:           `$();            // `free`busy`stale`closed
   lastheartbeat:    `timestamp$();
-  lastmembytes:     `long$();
   consecutivefails: `int$();
   healthy:          `boolean$();
   spawned:          `boolean$();     // if the primary created it or it was up from before

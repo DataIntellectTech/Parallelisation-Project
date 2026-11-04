@@ -62,7 +62,7 @@ system"l src/common/cgroup.q";
 // example run:
 // .primary.register ([id:5; pid:4000i; host:`localhost])
 .primary.register:{[info]
-  `secondaries upsert (info`id; .z.w; info`pid; info`host; `free; .z.P; 0N; 0Ni; 1b; info[`id] in key .primary.spawned; .z.P; .z.P; (); 0N; 0N; 0N; 0Np);
+  `secondaries upsert (info`id; .z.w; info`pid; info`host; `free; .z.P; 0Ni; 1b; info[`id] in key .primary.spawned; .z.P; .z.P; (); 0N; 0N; 0N; 0Np);
   .log.info "secondary ", string[info`id], " registered at: ", string .z.P;
   .primary.resultsdir
  };
@@ -72,7 +72,7 @@ system"l src/common/cgroup.q";
 // before a task arrived can be processed after dispatch has marked it busy
 
 .primary.heartbeatcheck:{[mem]
-  update lastheartbeat:.z.P, lastmembytes: mem from `secondaries where handle=.z.w;
+  update lastheartbeat:.z.P, rssanon: mem from `secondaries where handle=.z.w;
   update status:`free from `secondaries where handle=.z.w, status=`stale;
  };
 
@@ -92,7 +92,7 @@ system"l src/common/cgroup.q";
 // a snapshot of the primarys status
 // memory is in bytes headroom how far under the cap we are
 .primary.status:{
-  secs:select id, pid, status, spawned, currenttask, rssanon, restarts:0^.primary.respawns id, lastseen:`time$.z.P-lastheartbeat, lastmembytes from 0!secondaries;
+  secs:select id, pid, status, spawned, currenttask, rssanon, restarts:0^.primary.respawns id, lastseen:`time$.z.P-lastheartbeat from 0!secondaries;
   tot:.primary.totalmem[];
   mem:([total:tot; cap:.primary.memcap; headroom:.primary.memcap-tot; primary:.primary.selfmem]);
   pt:.primary.pausedtotal+$[.primary.paused; .z.P-.primary.pausedsince; 0D];

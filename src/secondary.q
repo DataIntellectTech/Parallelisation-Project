@@ -1,4 +1,4 @@
-// this is a secondary process: it runs tasks the master sends it and reports back
+// this is a secondary process: it runs tasks the primary sends it and reports back
 // example run
 // x src/secondary.q -id 1
 
@@ -29,9 +29,12 @@ if[count .secondary.hdb:getenv `HDB_DIR;
   sechandle
  };
 
+// this secondary's memory as the kernel counts it (RssAnon, bytes)
+.secondary.rssanon:{first exec rssanon from .mem.read enlist .z.i}
+
 // send hb and mem updates to primary
 .secondary.heartbeat:{
-  neg[.secondary.handle](`.primary.heartbeatcheck; .Q.w[]`used);
+  neg[.secondary.handle](`.primary.heartbeatcheck; .secondary.rssanon[]);
  };
 
 // called by the primary to kill spawned secondaries
@@ -69,13 +72,13 @@ if[count .secondary.hdb:getenv `HDB_DIR;
   memafter:first exec vmhwm from .mem.read enlist .z.i;
   if[`failure ~ first res;
     .Q.gc[];
-    memaftergc:first exec rssanon from .mem.read enlist .z.i;
+    memaftergc:.secondary.rssanon[];
     .log.warn "task ",string[tid],", failed with error: ",last res;
     :.secondary.send (`.primary.taskupdate; tid; `failed; `err`reason`membefore`memafter`memaftergc!(last res; `error; membefore; memafter; memaftergc))];
   saved:.secondary.save[tid; res];
   res:(::);
   .Q.gc[];
-  memaftergc:first exec rssanon from .mem.read enlist .z.i;
+  memaftergc:.secondary.rssanon[];
   if[`failure ~ first saved;
     .log.warn "task ",string[tid],", could not save its result: ",last saved;
     :.secondary.send (`.primary.taskupdate; tid; `failed; `err`reason`membefore`memafter`memaftergc!("could not save the result: ",last saved; `savefailed; membefore; memafter; memaftergc))];
