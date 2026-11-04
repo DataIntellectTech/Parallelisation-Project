@@ -1,7 +1,3 @@
-// memory figures from the kernel, used by the primary (to watch every secondary, even a busy one)
-// and by secondaries (to record each task's peak). See docs/memory-spike.md for why these figures
-// all values are in bytes; /proc reports kB (1024 bytes)
-
 // the fields read from /proc/<pid>/status
 // RssAnon = the process's own memory (q's heap as the kernel sees it), what the global cap adds up
 // VmRSS = all resident memory (RssAnon + file pages), VmHWM = the high-water mark of VmRSS

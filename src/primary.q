@@ -199,7 +199,7 @@ system"l src/common/cgroup.q";
     :0b];
   oldstate: first exec state from tasks where taskid=tid;
   if[not newstate in .primary.taskchange oldstate; 
-    .log.warn"the new task state ",string[newstate]," is not a valid option choose on of the following: ",", " sv string .primary.taskchange oldstate;
+    .log.warn"the new task state ",string[newstate]," is not a valid option choose one of the following: ",", " sv string .primary.taskchange oldstate;
     :0b];
   timecol: $[newstate in key .primary.statustime; (enlist .primary.statustime newstate)!enlist .z.P; ()!()];
   params: params, timecol, ([taskid: tid; state: newstate]);
@@ -215,7 +215,7 @@ system"l src/common/cgroup.q";
       if[not null params`memaftergc; update rssanon:params`memaftergc from `secondaries where id=sid]]];
   if[newstate=`failed; .primary.retry tid];
   if[newstate in `done`failed; .primary.jobcheck tid];
-  if[newstate in `done`failed; .primary.dispatch[]];  // prevents us waiting on the timer, when bench marking this was the biggest thi
+  if[newstate in `done`failed; .primary.dispatch[]];  // prevents us waiting on the timer, when bench marking this was the biggest this was biggest bottleneck so added it
   1b
  };
 
