@@ -52,7 +52,7 @@ system"l src/common/cgroup.q";
 
 // start sequence
 .primary.start:{
-  .timer.addjob.custom[`stalecheck; {.primary.check[]}; (); 5; 2; ()!()];
+  .timer.addjob.custom[`stalecheck; {.primary.check[]}; (); 1; 2; ()!()];
   .log.info "primary started, listening on ",string system "p";
   .primary.starttime:: .z.P;
  };
