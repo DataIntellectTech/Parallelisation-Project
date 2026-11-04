@@ -1,5 +1,5 @@
 // this is the primary process that monitors secondaries and assigns tasks
-// start from top level dir with 
+// start from top level dir with
 // q src/primary.q -p 45000
 
 // load in schema
@@ -10,9 +10,27 @@ system"l schemas/primarytables.q";
 // also look at resolving the dir name for a full file path use an env var in the config file
 system"l src/common/log.q";
 
-.primary.start:{[]
+// get env vars
+.primary.starttime:0Np;
+
+// dict of secondaries ids to their pids that the primary started
+.primary.spawned:(`long$())!`int$();
+
+// when a secondary starts add it to the secondaries table
+// example run:
+// .primary.register ([id:5; pid:4000i; host:`localhost])
+.primary.register:{[info]
+  `secondaries upsert ([id: info`id; handle: .z.w; pid: info`pid; host: info`host; status: `free;
+    lastheartbeat: .z.P; consecutivefails: 0i; healthy: 1b; spawned: info[`id] in key .primary.spawned;
+    starttime: .z.P; registeredtime: .z.P; tasktypes: (); currenttask: 0N; rssanon: 0N; vmrss: 0N; memtime: 0Np]);
+  .log.info "secondary ", string[info`id], " registered at: ", string .z.P;
+ };
+
+// start sequence
+.primary.start:{
   .log.info "primary started, listening on ",string system "p";
-  };
+  .primary.starttime:: .z.P;
+ };
 
 // start primary
 .primary.start[];
