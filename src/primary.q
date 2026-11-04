@@ -62,7 +62,9 @@ system"l src/common/cgroup.q";
 // example run:
 // .primary.register ([id:5; pid:4000i; host:`localhost])
 .primary.register:{[info]
-  `secondaries upsert (info`id; .z.w; info`pid; info`host; `free; .z.P; 0Ni; 1b; info[`id] in key .primary.spawned; .z.P; .z.P; (); 0N; 0N; 0N; 0Np);
+  `secondaries upsert ([id: info`id; handle: .z.w; pid: info`pid; host: info`host; status: `free;
+    lastheartbeat: .z.P; consecutivefails: 0i; healthy: 1b; spawned: info[`id] in key .primary.spawned;
+    starttime: .z.P; registeredtime: .z.P; tasktypes: (); currenttask: 0N; rssanon: 0N; vmrss: 0N; memtime: 0Np]);
   .log.info "secondary ", string[info`id], " registered at: ", string .z.P;
   .primary.resultsdir
  };
