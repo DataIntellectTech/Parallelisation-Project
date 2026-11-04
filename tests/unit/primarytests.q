@@ -16,8 +16,8 @@ if[not `primary in key `; system "l src/primary.q"];
     system "l schemas/primarytables.q";
    };
   should["have the correct schema for secondaries table"]{
-     (`id`handle`pid`host`port`status`lastheartbeat`lastmembytes`consecutivefails`healthy`spawned`starttime`registeredtime`tasktypes`currenttask`rssanon`vmrss`memtime) mustmatch cols secondaries;
-    "jiisispjibbpp jjjp" mustmatch exec t from meta secondaries;
+     (`id`handle`pid`host`status`lastheartbeat`lastmembytes`consecutivefails`healthy`spawned`starttime`registeredtime`tasktypes`currenttask`rssanon`vmrss`memtime) mustmatch cols secondaries;
+    "jiisspjibbpp jjjp" mustmatch exec t from meta secondaries;
    };
   should["have the correct schema for the tasks table"]{
     (`taskid`tasktype`args`priority`submittedtime`memestimate`timeout`retriesmax`retrycount`state`secondaryid`dispatchedtime`startedtime`finishedtime`membefore`memafter`memaftergc`err`reason`resultpath`resultbytes`jobid`user) mustmatch cols tasks;
@@ -37,7 +37,7 @@ if[not `primary in key `; system "l src/primary.q"];
   before{
     `.log.warn mock {};
     `.log.info mock {};
-    .primary.register ([id:1; pid:4000i; host:`localhost; port:45001i ]);
+    .primary.register ([id:1; pid:4000i; host:`localhost]);
    };
   should["have 1 secondary present"]{
     1 musteq count secondaries;

@@ -65,7 +65,7 @@
     .ut.reg each 1 2;
     t:.primary.status[]`secondaries;
     2 musteq count t;
-    `id`pid`port`status`spawned`currenttask`rssanon`restarts`lastseen`lastmembytes mustmatch cols t;
+    `id`pid`status`spawned`currenttask`rssanon`restarts`lastseen`lastmembytes mustmatch cols t;
    };
   should["show a just-registered secondary as seen moments ago"]{
     .ut.reg 1;

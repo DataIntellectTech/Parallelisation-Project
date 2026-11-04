@@ -19,7 +19,6 @@ system"l src/common/cgroup.q";
 .primary.heartbeat:00:00:00.001*"J"$getenv`HEARTBEAT_MS;
 .primary.spawnsecondaries:"B"$getenv`SPAWN_SECONDARY;
 .primary.numsecondaries:"J"$getenv`NUM_SECONDARYS;
-.primary.baseport:"J"$getenv`SECONDARY_BASE_PORT;
 .primary.stopgraceperiod:"J"$getenv`STOP_GRACE_PERIOD_SECS;
 .primary.logdir:getenv`LOG_DIR;
 .primary.qbin:getenv[`KDBX_HOME],"/bin/q";
@@ -61,9 +60,9 @@ system"l src/common/cgroup.q";
 
 // when a secondary starts add it to the secondaries table
 // example run:
-// .primary.register ([id:5; pid:4000i; host:`localhost; port:45001i ])
+// .primary.register ([id:5; pid:4000i; host:`localhost])
 .primary.register:{[info]
-  `secondaries upsert (info`id; .z.w; info`pid; info`host; info`port; `free; .z.P; 0N; 0Ni; 1b; info[`id] in key .primary.spawned; .z.P; .z.P; (); 0N; 0N; 0N; 0Np);
+  `secondaries upsert (info`id; .z.w; info`pid; info`host; `free; .z.P; 0N; 0Ni; 1b; info[`id] in key .primary.spawned; .z.P; .z.P; (); 0N; 0N; 0N; 0Np);
   .log.info "secondary ", string[info`id], " registered at: ", string .z.P;
   .primary.resultsdir
  };
@@ -93,7 +92,7 @@ system"l src/common/cgroup.q";
 // a snapshot of the primarys status
 // memory is in bytes headroom how far under the cap we are
 .primary.status:{
-  secs:select id, pid, port, status, spawned, currenttask, rssanon, restarts:0^.primary.respawns id, lastseen:`time$.z.P-lastheartbeat, lastmembytes from 0!secondaries;
+  secs:select id, pid, status, spawned, currenttask, rssanon, restarts:0^.primary.respawns id, lastseen:`time$.z.P-lastheartbeat, lastmembytes from 0!secondaries;
   tot:.primary.totalmem[];
   mem:([total:tot; cap:.primary.memcap; headroom:.primary.memcap-tot; primary:.primary.selfmem]);
   pt:.primary.pausedtotal+$[.primary.paused; .z.P-.primary.pausedsince; 0D];
@@ -111,7 +110,7 @@ system"l src/common/cgroup.q";
   d:pristatus`dispatch;
   -1 "dispatch: ",$[d`paused; "PAUSED (memory over the cap) since ",string d`pausedsince; "running"],", paused ",string[d`pausecount]," times for ",string d`pausedtotal;
   -1 "secondaries: ",fmt pristatus`seccounts;
-  show `id xasc select id, pid, port, status, spawned, task:currenttask, memmb:0.1*floor 0.5+10*rssanon%1048576, restarts, lastseen from pristatus`secondaries;
+  show `id xasc select id, pid, status, spawned, task:currenttask, memmb:0.1*floor 0.5+10*rssanon%1048576, restarts, lastseen from pristatus`secondaries;
   -1 "tasks: ",fmt pristatus`taskcounts;
  };
 
@@ -185,7 +184,7 @@ system"l src/common/cgroup.q";
     ([taskid:tid; args:enlist task`args; submittedtime:.z.P; retrycount:0i; state:`queued; secondaryid:0N; dispatchedtime:0Np; startedtime:0Np;
     finishedtime:0Np; membefore:0N; memafter:0N; memaftergc:0N; err:""; reason:`; resultpath:`; resultbytes:0N; jobid:0N; user:`]);
   `tasks upsert data;
-  .log.info "new task ",string[tid]," ",string task`tasktype;
+  .log.debug "new task ",string[tid]," ",string task`tasktype;
   tid
  };
 
@@ -202,7 +201,6 @@ system"l src/common/cgroup.q";
     :0b];
   timecol: $[newstate in key .primary.statustime; (enlist .primary.statustime newstate)!enlist .z.P; ()!()];
   params: params, timecol, ([taskid: tid; state: newstate]);
-  .log.info "updating task id ",string[tid]," from ",string[oldstate]," to ",string newstate;
   upsert[`tasks; params];
   .log.info "updated task id ",string[tid]," from ",string[oldstate]," to ",string newstate;
   if[newstate in `done`failed;
@@ -232,7 +230,7 @@ system"l src/common/cgroup.q";
     update status:`stale, currenttask: 0N from `secondaries where id=sid;
     :.primary.taskupdate[tid; `failed; ([err:"send failed with error: ",last res; reason:`sendfailed])];
    ];
-  .log.info "sent task ",string[tid]," to secondary ",string[sid]," to run task ",string t`tasktype;
+  .log.info "sent task ",string[tid]," (",string[t`tasktype],") to secondary ",string sid;
  };
 
 // Claude

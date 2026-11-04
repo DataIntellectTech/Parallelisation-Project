@@ -5,7 +5,6 @@ secondaries : ([id: `long$()]
   handle:           `int$();
   pid:              `int$();
   host:             `$();
-  port:             `int$();
   status:           `$();            // `free`busy`stale`closed
   lastheartbeat:    `timestamp$();
   lastmembytes:     `long$();

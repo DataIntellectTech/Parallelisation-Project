@@ -19,7 +19,7 @@ if[count .secondary.hdb:getenv `HDB_DIR;
 // get the id form start cmd
 .secondary.opts: .Q.opt .z.x;
 .secondary.id: "J"$first .secondary.opts`id;
-.secondary.info:([id: .secondary.id; pid: .z.i; host: .z.h; port: system"p"]);
+.secondary.info:([id: .secondary.id; pid: .z.i; host: .z.h]);
 
 // used to connect and register with primary
 .secondary.connect:{
