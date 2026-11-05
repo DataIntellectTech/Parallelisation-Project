@@ -37,6 +37,12 @@ if[count .secondary.hdb:getenv `HDB_DIR;
   neg[.secondary.handle](`.primary.heartbeatcheck; .secondary.rssanon[]);
  };
 
+// called by the primary to kill spawned secondaries
+.secondary.stop:{
+  .log.info "told to stop by the primary, exiting";
+  exit 0;
+ };
+
 // if the primary's connection closes kill the secondary
 .z.pc:{[h]
   if[not h~.secondary.handle; :()];

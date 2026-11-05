@@ -54,6 +54,9 @@ To check that it's up, in the primary:
 .primary.showstatus[]      / memory, dispatch, every secondary and the task counts
 ```
 
+### Stopping primary and secondaries
+To stop everything, quit the primary (`\\`): it asks its secondaries to exit, and kills any still running after `STOP_GRACE_PERIOD_SECS`. To start one more secondary from the primary, use `.primary.spawn <next available id>`.
+
 ## Running a task
 
 Tasks are submitted as **jobs**, from any q session.
