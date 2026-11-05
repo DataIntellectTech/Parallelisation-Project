@@ -24,10 +24,24 @@ system"l src/common/cgroup.q";
 .primary.stopgraceperiod:"J"$getenv`STOP_GRACE_PERIOD_SECS;
 .primary.qbin:getenv[`KDBX_HOME],"/bin/q";
 .primary.secondarythreads:1|"J"$getenv`THREADS;
+.primary.tasktimeout:`time$"J"$getenv `TASK_TIMEOUT_MS;
+.primary.taskretries:"I"$getenv`TASK_RETRIES_MAX;
+.primary.tasktypes:`$"," vs getenv`TASK_TYPES;
+.primary.lasttaskid:0;
+.primary.resultsroot:getenv `RESULTS_DIR;
 
 
 // dict of secondaries ids to their pids that the primary started
 .primary.spawned:(`long$())!`int$();
+
+// defaults for the optional task fields, newtask fills any missing field from here
+.primary.taskdefaults:([priority:0i; memestimate: 0N; timeout: .primary.tasktimeout; retriesmax: .primary.taskretries]);
+
+// what each task status can move to
+.primary.taskchange:([queued: `dispatched`failed; dispatched: `running`failed; running: `done`failed; done:`$(); failed:enlist `queued]);
+
+// the time column that gets updated at each task status
+.primary.statustime:([dispatched: `dispatchedtime; running: `startedtime; done: `finishedtime; failed: `finishedtime]);
 
 // when a secondary starts add it to the secondaries table
 // example run:
@@ -37,6 +51,7 @@ system"l src/common/cgroup.q";
     lastheartbeat: .z.P; consecutivefails: 0i; healthy: 1b; spawned: info[`id] in key .primary.spawned;
     starttime: .z.P; registeredtime: .z.P; tasktypes: (); currenttask: 0N; rssanon: 0N; vmrss: 0N; memtime: 0Np]);
   .log.info "secondary ", string[info`id], " registered at: ", string .z.P;
+  .primary.resultsdir
  };
 
 // called by each secondary to let the primary know it is not idle
@@ -47,7 +62,7 @@ system"l src/common/cgroup.q";
   update status:`free from `secondaries where handle=.z.w, status=`stale;
  };
 
-// mark secondaries that arent sedning updates as stale
+// mark secondaries that arent sending updates as stale
 .primary.check:{
   if[not count secondaries; :()];
   stale: exec id from secondaries where status=`free, lastheartbeat < .z.P - .primary.stale;
@@ -73,7 +88,7 @@ system"l src/common/cgroup.q";
  };
 
 // bring up a secondary with a given id
-// example uage:
+// example usage:
 // .primary.spawn 1
 .primary.spawn:{
   if[x in .primary.usedids[];
@@ -85,7 +100,7 @@ system"l src/common/cgroup.q";
   pid:"I"$first system startcmd;
   .log.info "running system command: ", startcmd;
   .primary.spawned[x]:pid;
-  .log.info "spawned secondary ",string[x]," ,pid ",string pid;
+  .log.info "spawned secondary ",string[x]," , pid ",string pid;
  };
 
 // used to shut down all spawned secondaries
@@ -103,6 +118,93 @@ system"l src/common/cgroup.q";
   .log.info "stopped";
  };
 
+// keep track of task ids
+.primary.nexttaskid:{
+  .primary.lasttaskid+::1;
+  .primary.lasttaskid
+ };
+
+// add a new task to the tasks table
+// task is a dict with tasktype and args always required every other col is optional
+// example run:
+// .primary.newtask ([tasktype:`sumtil; args:1000])
+.primary.newtask:{[task]
+  if[not 99h=type task;
+    .log.warn "newtask: a task must be a dict"; :0N];
+  if[not all `tasktype`args in key task;
+    .log.warn "newtask: tasktype and args are required"; :0N];
+  if[not task[`tasktype] in .primary.tasktypes;
+    .log.warn "newtask: unknown task type ",string task`tasktype; :0N];  // this can be rejected here before it gets to a secondary
+  if[count bad:key[task] except `tasktype`args,key .primary.taskdefaults;
+    .log.warn "newtask: unknown fields ",", " sv string bad; :0N];
+  tid:.primary.nexttaskid[];
+  data:.primary.taskdefaults,task,
+    ([taskid:tid; args:enlist task`args; submittedtime:.z.P; retrycount:0i; state:`queued; secondaryid:0N; dispatchedtime:0Np; startedtime:0Np;
+    finishedtime:0Np; membefore:0N; memafter:0N; memaftergc:0N; err:""; reason:`; resultpath:`; resultbytes:0N; jobid:0N; user:`]);
+  `tasks upsert data;
+  .log.debug "new task ",string[tid]," ",string task`tasktype;
+  tid
+ };
+
+// update task status using .primary.taskchange and .primary.statustime
+// params allows us to update other columns eg. retriesmax and retrycount
+// if nothing for params it should be an empty dict
+.primary.taskupdate:{[tid; newstate; params]
+  if[not count exec taskid from tasks where taskid=tid; 
+    .log.warn"the task id ",string[tid]," is not present in the tasks table";
+    :0b];
+  oldstate: first exec state from tasks where taskid=tid;
+  if[not newstate in .primary.taskchange oldstate; 
+    .log.warn"the new task state ",string[newstate]," is not a valid option, choose one of the following: ",", " sv string .primary.taskchange oldstate;
+    :0b];
+  timecol: $[newstate in key .primary.statustime; (enlist .primary.statustime newstate)!enlist .z.P; ()!()];
+  params: params, timecol, ([taskid: tid; state: newstate]);
+  upsert[`tasks; params];
+  .log.info "updated task id ",string[tid]," from ",string[oldstate]," to ",string newstate;
+  if[newstate in `done`failed;
+    sid:first exec secondaryid from tasks where taskid=tid;
+    update status:`free, currenttask:0N from `secondaries where id=sid, currenttask=tid, status=`busy;
+    // Claude as part of bench-401
+    // the secondary has just given its memory back (.Q.gc[]): use its own after-gc figure until the next poll,
+    // so dispatch sees the freed memory straight away instead of the last poll's reading
+    if[`memaftergc in key params;
+      if[not null params`memaftergc; update rssanon:params`memaftergc from `secondaries where id=sid]]];
+  //if[newstate=`failed; .primary.retry tid]; // will add once we add in retry logic
+  //if[newstate in `done`failed; .primary.jobcheck tid]; // will add in once adding jobs bit
+  if[newstate in `done`failed; .primary.dispatch[]];  // prevents us waiting on the timer, when bench marking this was the biggest this was biggest bottleneck so added it
+  1b
+ };
+
+// sends the task to the secondary, if sending fails early exit and mark as stale
+.primary.sendtask:{[sid; tid]
+  if[not (`free~secondaries[sid]`status) and `queued~tasks[tid]`state; :()];
+  h:first exec handle from secondaries where id=sid;
+  t:tasks tid;
+  update status:`busy, currenttask:tid from `secondaries where id=sid;
+  .primary.taskupdate[tid; `dispatched; ([secondaryid: sid])];
+  res:@[neg[h]; (`.secondary.runtask; tid; t`tasktype; first t`args); {[error] (`sendfailed; error)}];
+  if[`sendfailed~ first res;
+    .log.warn "cannot send task ",string[tid]," to secondary ",string sid;
+    update status:`stale, currenttask: 0N from `secondaries where id=sid;
+    :.primary.taskupdate[tid; `failed; ([err:"send failed with error: ",last res; reason:`sendfailed])];
+   ];
+  .log.info "sent task ",string[tid]," (",string[t`tasktype],") to secondary ",string sid;
+ };
+
+// hand a queued task to a secondary, do it by priority then by oldest first
+// will run on a timer every 1 sec
+.primary.dispatch:{
+  freesec: exec id from secondaries where status=`free;
+  if[not count freesec; :()];
+  qtasks: exec taskid from `priority xdesc select taskid, priority from 0!tasks where state=`queued;
+  if[not count qtasks; :()];
+  //if[.primary.overcap[]; :()]; // will add in once we add in mem cap logic
+  //qtasks:.primary.fit[qtasks; count freesec]; // will add in once we add in mem cap logic
+  n:min count[freesec], count qtasks;
+  if[n=0; :()];
+  .primary.sendtask'[n#freesec; n#qtasks];
+ };
+
 
 // if a secondary loses connection mark it as closed
 .z.pc:{[h]
@@ -118,8 +220,13 @@ system"l src/common/cgroup.q";
 
 // start sequence
 .primary.start:{
+  if[not count .primary.resultsroot; '"RESULTS_DIR is not set"];
+  .primary.resultsdir::.primary.resultsroot,"/",ssr[string .z.P;":";"."];
+  .os.mkdir .primary.resultsdir;
+  .log.info "task results will be saved in ",.primary.resultsdir;
   if[.primary.spawnsecondaries; .primary.spawn each 1+til .primary.numsecondaries];
   .timer.addjob.custom[`stalecheck; {.primary.check[]}; (); 1; 2; ()!()];
+  .timer.addjob.custom[`dispatch; {.primary.dispatch[]}; (); 1; 2; ()!()];
   .log.info "primary started, listening on ",string system "p";
   .primary.starttime:: .z.P;
  };
