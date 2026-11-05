@@ -19,6 +19,12 @@ system"l src/common/cgroup.q";
 .primary.stale:00:00:00.001*"J"$getenv`STALE_MS;
 .primary.heartbeat:00:00:00.001*"J"$getenv`HEARTBEAT_MS;
 .primary.logdir:getenv`LOG_DIR;
+.primary.spawnsecondaries:"B"$getenv`SPAWN_SECONDARY;
+.primary.numsecondaries:"J"$getenv`NUM_SECONDARYS;
+.primary.stopgraceperiod:"J"$getenv`STOP_GRACE_PERIOD_SECS;
+.primary.qbin:getenv[`KDBX_HOME],"/bin/q";
+.primary.secondarythreads:1|"J"$getenv`THREADS;
+
 
 // dict of secondaries ids to their pids that the primary started
 .primary.spawned:(`long$())!`int$();
@@ -50,8 +56,69 @@ system"l src/common/cgroup.q";
     .log.warn "no heartbeat from secondary ",(", " sv string stale)];
  };
 
+// used to start a secondary process
+.primary.spawncmd:{
+  " " sv (.primary.qbin; "src/secondary.q"; "-id"; string x; "-s"; string .primary.secondarythreads)
+ };
+
+// ids taken right now: registered and still connected
+.primary.usedids:{
+  exec id from secondaries where status<>`closed
+ };
+
+// the lowest id not in use, e.g. 3 when 1, 2 and 4 are taken
+.primary.nextid:{
+  ids:.primary.usedids[];
+  min (1+til 1+count ids) except ids
+ };
+
+// bring up a secondary with a given id
+// example uage:
+// .primary.spawn 1
+.primary.spawn:{
+  if[x in .primary.usedids[];
+    .log.warn "secondary ",string[x]," already exists; next available id is ",string .primary.nextid[];
+    :()];
+  .os.mkdir .primary.logdir;
+  logfile:.primary.logdir,"/sec",string[x],".",ssr[19#string .z.P;":";"."],".log";
+  startcmd:.primary.spawncmd[x]," < /dev/null >> ",logfile," 2>&1 & echo $!";
+  pid:"I"$first system startcmd;
+  .log.info "running system command: ", startcmd;
+  .primary.spawned[x]:pid;
+  .log.info "spawned secondary ",string[x]," ,pid ",string pid;
+ };
+
+// used to shut down all spawned secondaries
+// used when the primary is shut down to stop any secondaries it started
+.primary.stop:{
+  .log.info "stopping secondaries";
+  handles:exec handle from secondaries where not null handle, not status=`closed;
+  {[h] @[neg[h];(`.secondary.stop;::);{[e] ::}]} each handles;
+  .os.sleep .primary.stopgraceperiod;
+  left:p where .os.exists each "/proc/",/:string p:value .primary.spawned;
+  if[count left;
+    .log.warn "killing secondaries that didn't exit: pids ",", " sv string left;
+    {[p] @[.os.kill9;p;{[e] ::}]} each left];
+  .primary.spawned:(`long$())!`int$();
+  .log.info "stopped";
+ };
+
+
+// if a secondary loses connection mark it as closed
+.z.pc:{[h]
+  secid: first exec id from secondaries where handle=h;
+  if[null secid; :()];
+  update status:`closed, handle:0Ni, currenttask: 0N from `secondaries where id=secid;
+  .log.info "secondary ",string[secid]," has closed its connection to the primary";
+ };
+
+// quitting the primary kills any spawned secondaries
+.z.exit:{ if[count .primary.spawned; .primary.stop[]]};
+
+
 // start sequence
 .primary.start:{
+  if[.primary.spawnsecondaries; .primary.spawn each 1+til .primary.numsecondaries];
   .timer.addjob.custom[`stalecheck; {.primary.check[]}; (); 1; 2; ()!()];
   .log.info "primary started, listening on ",string system "p";
   .primary.starttime:: .z.P;
