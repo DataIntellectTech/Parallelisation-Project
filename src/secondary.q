@@ -6,6 +6,15 @@
 // todo: change this in the future to load in the entire common code or all files with an each
 // also look at resolving the dir name for a full file path use an env var in the config file
 system"l src/common/log.q";
+system"l src/common/timer.q";
+system"l src/common/os.q";
+system"l src/approvedtasks.q";
+system"l src/common/mem.q";
+
+// if hdb set load it in
+if[count .secondary.hdb:getenv `HDB_DIR;
+  system "l ",getenv `HDB_DIR;
+ ];
 
 // get the id from start cmd
 .secondary.opts: .Q.opt .z.x;
@@ -20,6 +29,14 @@ system"l src/common/log.q";
   sechandle
  };
 
+// this secondary's memory as the kernel counts it (RssAnon, bytes)
+.secondary.rssanon:{first exec rssanon from .mem.read enlist .z.i};
+
+// send hb and mem updates to primary
+.secondary.heartbeat:{
+  neg[.secondary.handle](`.primary.heartbeatcheck; .secondary.rssanon[]);
+ };
+
 // if the primary's connection closes kill the secondary
 .z.pc:{[h]
   if[not h~.secondary.handle; :()];
@@ -31,6 +48,7 @@ system"l src/common/log.q";
 .secondary.start:{
   .secondary.handle:: .secondary.connect[];
   @[.secondary.handle; (`.primary.register; .secondary.info); {[error] .log.error "registering with the primary failed with error: ",error,". Will exit the process now"; exit 1}];
+  .timer.addjob.custom[`heartbeat; {.secondary.heartbeat[]}; (); 1; 2; ()!()];
   .log.info "secondary ",string[.secondary.id]," started";
  };
 

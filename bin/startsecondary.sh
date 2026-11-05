@@ -21,10 +21,7 @@ set -a
 source "$CONFIG"
 set +a
 
-: "${SECONDARY_BASE_PORT:?startsecondary: SECONDARY_BASE_PORT is not set in $CONFIG}"
 
-# secondary 1 gets the base port, secondary 2 the next one up and so on
-PORT=$(( SECONDARY_BASE_PORT + ID - 1 ))
 export QHOME="$KDBX_HOME"
 
 # used for creating logs
@@ -32,11 +29,12 @@ export QHOME="$KDBX_HOME"
 mkdir -p logs
 LOG="logs/sec$ID.$(date -u +%Y.%m.%dD%H.%M.%S).log"
 
-# nohup to run in bbackgorund if want to run interactively just use x src/primary.q
-nohup "$KDBX_HOME/bin/q" src/secondary.q -p "$PORT" -id "$ID" < /dev/null >> "$LOG" 2>&1 &
-# should we use secondaries
-#nohup "$KDBX_HOME/bin/q" src/secondary.q -p "$PORT" -id "$ID" -s 8 < /dev/null >> "$LOG" 2>&1 &
+# if THREADS not set it defaults to 1
+THREADS=${THREADS:-1}
+
+# nohup to run in backgorund if want to run interactively just use x src/secondary.q -id 1
+nohup "$KDBX_HOME/bin/q" src/secondary.q -id "$ID" -s "$THREADS" < /dev/null >> "$LOG" 2>&1 &
 
 
 echo $! > "logs/sec$ID.pid"
-echo "start secondary: id $ID, port $PORT, config $CONFIG, pid $!, log $LOG"
+echo "start secondary: id $ID, config $CONFIG, pid $!, log $LOG"
