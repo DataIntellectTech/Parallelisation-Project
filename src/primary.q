@@ -40,6 +40,8 @@ system"l src/common/cgroup.q";
 .primary.respawnmax:"J"$getenv`RESPAWN_MAX;   // how many times a spawned secondary is restarted after dying; 0 or null = never
 .primary.resultsroot:getenv `RESULTS_DIR;
 .primary.lastjobid:0;
+.primary.minheadroom:0f^"F"$getenv`MIN_HEADROOM_FRACTION;
+.primary.estimatemargin:1f^"F"$getenv`ESTIMATE_MARGIN;
 
 
 // dict of secondaries ids to their pids that the primary started
@@ -251,17 +253,23 @@ system"l src/common/cgroup.q";
 // memestimate fits in the memory left under the cap; what's sent is reserved, so one dispatch can't hand out
 // the same headroom twice. A task that doesn't fit waits and a smaller one behind it can go; a task with no
 // estimate always goes (it's how a new task type is learnt). With no cap set, the first n go as before
+// two settings make it more careful, both off by default:
+// - MIN_HEADROOM_FRACTION: each task must leave this fraction of the cap free (the brief's dispatchWatermarkBytes);
+//   a task with no estimate only goes if at least that much is free
+// - ESTIMATE_MARGIN: each task counts as its estimate times this (the brief's headroomSafetyFactor, turned round)
 .primary.fit:{[qtasks; n]
   if[null .primary.memcap; :n sublist qtasks];
-  headroom:.primary.memcap-.primary.committedmem[];
-  taskest:0^(exec taskid!memestimate from tasks) qtasks;
-  // nothing running: send the first task whatever its estimate, so it can't wait for ever on the secondaries'
-  // own baseline memory
-  if[not count select from secondaries where status=`busy; headroom:headroom|first taskest];
-  // the headroom left after each task: one that fits uses up its estimate, one that doesn't leaves it unchanged
-  left:headroom {[room;est] $[est<=room; room-est; room]}\ taskest;
-  // a task fits if its estimate is within what was left before it
-  fits:taskest<=headroom,-1_left;
+  // the memory we can hand out: what's left under the cap, less the spare we keep
+  usable:.primary.memcap-.primary.committedmem[]+`long$.primary.minheadroom*.primary.memcap;
+  // what each task counts as: its estimate plus the margin, rounded up; 0 for a task with no estimate
+  need:ceiling .primary.estimatemargin*0^(exec taskid!memestimate from tasks) qtasks;
+  // nothing running: send the first task whatever its size, so it can't wait for ever on the secondaries'
+  // own baseline memory, the spare or the margin
+  if[not count select from secondaries where status=`busy; usable:usable|first need];
+  // the memory left after each task: one that fits uses up what it needs, one that doesn't leaves it unchanged
+  left:usable {[room;need] $[need<=room; room-need; room]}\ need;
+  // a task fits if what it needs is within what was left before it
+  fits:need<=usable,-1_left;
   n sublist qtasks where fits
  };
 
@@ -509,6 +517,8 @@ system"l src/common/cgroup.q";
 
 // start sequence
 .primary.start:{
+  if[not .primary.minheadroom within 0 0.99; '"MIN_HEADROOM_FRACTION must be from 0 to 0.99"];
+  if[.primary.estimatemargin<=0; '"ESTIMATE_MARGIN must be more than 0"];
   if[not count .primary.resultsroot; '"RESULTS_DIR is not set"];
   .primary.resultsdir::.primary.resultsroot,"/",ssr[string .z.P;":";"."];
   system "mkdir -p ",.primary.resultsdir;

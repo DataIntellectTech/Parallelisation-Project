@@ -1,7 +1,8 @@
 / unit specs for the V2 headroom check: .primary.committedmem, .primary.fit and its use in .primary.dispatch
 / loads primary.q once (spawning off). Secondaries are registered on handle 0i, so sends run in this process and
 / .secondary.runtask is mocked to record them. Memory is set by hand: the primary 0, each secondary's rssanon 0,
-/ a 1000MB cap; tasks are given their memestimate directly
+/ a 1000MB cap; tasks are given their memestimate directly. The spare memory and estimate margin are off
+/ (0 and 1) unless a test sets them
 / run: tests/run.sh tests/unit/fit_spec.q
 
 setenv[`SPAWN_SECONDARY;enlist "0"];
@@ -20,7 +21,8 @@ if[not `primary in key `; system "l src/primary.q"];
 / a queued sleep task expected to need mb MB (0N for no estimate); returns its id
 .ut.ftnew:{[mb] .primary.newtask `tasktype`args`memestimate!(`sleep;1;$[null mb;0N;mb*.ut.ftmb])};
 
-/ logs silenced, a 1000MB cap, the primary using nothing, the over-the-cap gate off, sends recorded
+/ logs silenced, a 1000MB cap, the primary using nothing, the over-the-cap gate off, no spare memory and no
+/ estimate margin, sends recorded
 .ut.ftmocks:{[]
   .tst.mock[`.log.info; {[x] ::}];
   .tst.mock[`.log.warn; {[x] ::}];
@@ -28,6 +30,8 @@ if[not `primary in key `; system "l src/primary.q"];
   .tst.mock[`.primary.memcap; 1000*.ut.ftmb];
   .tst.mock[`.primary.selfmem; 0];
   .tst.mock[`.primary.overcap; {[] 0b}];
+  .tst.mock[`.primary.minheadroom; 0f];
+  .tst.mock[`.primary.estimatemargin; 1f];
   `.ut.ftsent set `long$();
   .tst.mock[`.secondary.runtask; {[tid;tt;a] .ut.ftsent,:tid}];
  };
@@ -106,6 +110,56 @@ if[not `primary in key `; system "l src/primary.q"];
     .primary.taskupdate[a;`running;()!()];
     .primary.taskupdate[a;`done;([resultpath:`; resultbytes:0; membefore:0; memafter:0; memaftergc:2*.ut.ftmb])];
     1b musteq b in .ut.ftsent;
+    };
+ };
+
+.tst.desc[".primary.fit - spare memory and the estimate margin"]{
+  before{
+    .ut.ftmocks[];
+    .ut.ftreset 4;
+    };
+  should["not send a task that would leave less than the spare free"]{
+    `.primary.minheadroom mock 0.1;
+    a:.ut.ftnew 700;
+    b:.ut.ftnew 300;
+    .primary.dispatch[];
+    / 100MB kept spare: 700 fits in 900, then 300 doesn't fit in the 200 left (it would without the spare)
+    (enlist a) mustmatch .ut.ftsent;
+    `queued musteq tasks[b]`state;
+    };
+  should["hold back a task with no estimate when less than the spare is free"]{
+    `.primary.minheadroom mock 0.1;
+    .ut.ftnew 950;
+    .primary.dispatch[];
+    / 950 went because nothing was running; with it busy, only 50MB is free, under the 100MB spare
+    unknown:.ut.ftnew 0N;
+    .primary.dispatch[];
+    `queued musteq tasks[unknown]`state;
+    };
+  should["hold back a task whose estimate plus the margin doesn't fit"]{
+    `.primary.estimatemargin mock 1.25;
+    .ut.ftnew 10;
+    .primary.dispatch[];
+    / 990MB left: 800 counts as 1000, so it waits (it would go without the margin)
+    big:.ut.ftnew 800;
+    .primary.dispatch[];
+    `queued musteq tasks[big]`state;
+    };
+  should["still send a task whose estimate plus the margin fits"]{
+    `.primary.estimatemargin mock 1.25;
+    .ut.ftnew 10;
+    .primary.dispatch[];
+    / 990MB left: 790 counts as 988, so it goes
+    ok:.ut.ftnew 790;
+    .primary.dispatch[];
+    1b musteq ok in .ut.ftsent;
+    };
+  should["still send the first task when nothing is running, whatever the spare and margin"]{
+    `.primary.minheadroom mock 0.5;
+    `.primary.estimatemargin mock 2f;
+    t:.ut.ftnew 600;
+    .primary.dispatch[];
+    (enlist t) mustmatch .ut.ftsent;
     };
  };
 
