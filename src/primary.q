@@ -163,7 +163,7 @@ system"l src/common/cgroup.q";
   .log.info "updated task id ",string[tid]," from ",string[oldstate]," to ",string newstate;
   if[newstate in `done`failed;
     sid:first exec secondaryid from tasks where taskid=tid;
-    update status:`free, currenttask:0N from `secondaries where id=sid, currenttask=tid, status=`busy;
+    update status:`free, currenttask:0N, lastgeartbeat:.z.P from `secondaries where id=sid, currenttask=tid, status=`busy;
     // Claude as part of bench-401
     // the secondary has just given its memory back (.Q.gc[]): use its own after-gc figure until the next poll,
     // so dispatch sees the freed memory straight away instead of the last poll's reading
