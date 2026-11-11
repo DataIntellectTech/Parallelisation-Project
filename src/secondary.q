@@ -54,31 +54,32 @@ if[count .secondary.hdb:getenv `HDB_DIR;
   if[not tasktype in at: key .secondary.approvedtasks;
     .log.warn "the task ",string[tasktype]," is not in the approved tasks list. Approved tasks are: ",", " sv string at;
     :.secondary.send (`.primary.taskupdate; tid; `failed; ([err: "unknown tasktype: ",string tasktype; reason: `error; membefore: membefore; memafter: membefore]))];
-  res:@[{.secondary.approvedtasks[x] y}[tasktype;]; args; {[error] (`failure; error)}];
+  // (1b; result) is a success, (0b; error) is a failure
+  res:@[{1b; .secondary.approvedtasks[x] y}[tasktype;]; args; {[error] (0b; error)}];
   memafter:first exec vmhwm from .mem.read enlist .z.i;
-  if[`failure ~ first res;
+  if[not first res;
     .Q.gc[];
     memaftergc:.secondary.rssanon[];
     .log.warn "task ",string[tid],", failed with error: ",last res;
     :.secondary.send (`.primary.taskupdate; tid; `failed; ([err: last res; reason: `error; membefore: membefore; memafter: memafter; memaftergc: memaftergc]))];
-  saved:.secondary.save[tid; res];
+  saved:.secondary.save[tid; last res];
   res:(::);
   .Q.gc[];
   memaftergc:.secondary.rssanon[];
-  if[`failure ~ first saved;
+  if[not first saved;
     .log.warn "task ",string[tid],", could not save its result: ",last saved;
     :.secondary.send (`.primary.taskupdate; tid; `failed; ([err: "could not save the result: ",last saved; reason: `savefailed; membefore: membefore; memafter: memafter; memaftergc: memaftergc]))];
-  .log.info "task ",string[tid]," is complete, result saved to ",string first saved;
-  .secondary.send (`.primary.taskupdate; tid; `done; ([resultpath: first saved; resultbytes: last saved; membefore: membefore; memafter: memafter; memaftergc: memaftergc]));
+  .log.info "task ",string[tid]," is complete, result saved to ",string saved 1;
+  .secondary.send (`.primary.taskupdate; tid; `done; ([resultpath: saved 1; resultbytes: saved 2; membefore: membefore; memafter: memafter; memaftergc: memaftergc]));
  };
 
-// save a tasks result, returns path and bytes, doesnt save if a null is the result
+// save a task's result to the run's results folder: (1b; path; bytes), or (0b; error) if it couldn't be saved
 // this path will change when we add in jobs to
 // $RESPATH/primary_session/jobID/each_taskID
 .secondary.save:{[tid; res]
-  if[(::)~res; :(`; 0)];
+  if[(::)~res; :(1b; `; 0)];
   path:hsym `$.secondary.resultsdir,"/",string tid;
-  @[{[p;r] p set r; (p; hcount p)}[path]; res; {[e] (`failure; e)}]
+  @[{[p;r] p set r; (1b; p; hcount p)}[path]; res; {[e] (0b; e)}]
  };
 
 
