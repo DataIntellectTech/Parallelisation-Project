@@ -34,7 +34,7 @@ if[count .secondary.hdb:getenv `HDB_DIR;
 
 // send hb and mem updates to primary
 .secondary.heartbeat:{
-  neg[.secondary.handle](`.primary.heartbeatcheck; .secondary.rssanon[]);
+  .secondary.send (`.primary.heartbeatcheck; .secondary.rssanon[]);
  };
 
 // called by the primary to kill spawned secondaries
@@ -47,28 +47,31 @@ if[count .secondary.hdb:getenv `HDB_DIR;
 // used mainly for updating the primary on tasks and memory 
 .secondary.send:{[msg] neg[.secondary.handle] msg; neg[.secondary.handle][]};
 
+// for when a secondary fails a task
+.secondary.fail:{[tid; reason; err; mem]
+  .log.warn "task ",string[tid]," failed (",string[reason],"): ",err;
+  .secondary.send (`.primary.taskupdate; tid; `failed; ([err:err; reason:reason]),mem)
+ };
+
 // secondary tells primary it is starting, record mem before, run task, record mem after result, .Q.gc[], save result, returns where result is saved and its size
 .secondary.runtask:{[tid; tasktype; args]
   .secondary.send (`.primary.taskupdate; tid; `running; ()!());
   membefore:.mem.readandclear[]`rssanon;
   if[not tasktype in at: key .secondary.approvedtasks;
-    .log.warn "the task ",string[tasktype]," is not in the approved tasks list. Approved tasks are: ",", " sv string at;
-    :.secondary.send (`.primary.taskupdate; tid; `failed; ([err: "unknown tasktype: ",string tasktype; reason: `error; membefore: membefore; memafter: membefore]))];
+    :.secondary.fail[tid; `error; "unknown tasktype: ",string tasktype; ([membefore:membefore; memafter:membefore])]];
   // (1b; result) is a success, (0b; error) is a failure
-  res:@[{1b; .secondary.approvedtasks[x] y}[tasktype;]; args; {[error] (0b; error)}];
+  res:@[{(1b; .secondary.approvedtasks[x] y)}[tasktype;]; args; {[error] (0b; error)}];
   memafter:first exec vmhwm from .mem.read enlist .z.i;
   if[not first res;
     .Q.gc[];
     memaftergc:.secondary.rssanon[];
-    .log.warn "task ",string[tid],", failed with error: ",last res;
-    :.secondary.send (`.primary.taskupdate; tid; `failed; ([err: last res; reason: `error; membefore: membefore; memafter: memafter; memaftergc: memaftergc]))];
+    :.secondary.fail[tid; `error; last res; ([membefore:membefore; memafter:memafter; memaftergc:.secondary.rssanon[]])]];
   saved:.secondary.save[tid; last res];
   res:(::);
   .Q.gc[];
   memaftergc:.secondary.rssanon[];
   if[not first saved;
-    .log.warn "task ",string[tid],", could not save its result: ",last saved;
-    :.secondary.send (`.primary.taskupdate; tid; `failed; ([err: "could not save the result: ",last saved; reason: `savefailed; membefore: membefore; memafter: memafter; memaftergc: memaftergc]))];
+    :.secondary.fail[tid; `savefailed; "could not save the result: ",last saved; ([membefore:membefore; memafter:memafter; memaftergc:memaftergc])]];
   .log.info "task ",string[tid]," is complete, result saved to ",string saved 1;
   .secondary.send (`.primary.taskupdate; tid; `done; ([resultpath: saved 1; resultbytes: saved 2; membefore: membefore; memafter: memafter; memaftergc: memaftergc]));
  };

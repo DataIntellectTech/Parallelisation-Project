@@ -201,7 +201,6 @@ system"l src/common/cgroup.q";
   //if[.primary.overcap[]; :()]; // will add in once we add in mem cap logic
   //qtasks:.primary.fit[qtasks; count freesec]; // will add in once we add in mem cap logic
   n:min count[freesec], count qtasks;
-  if[n=0; :()];
   .primary.sendtask'[n#freesec; n#qtasks];
  };
 
