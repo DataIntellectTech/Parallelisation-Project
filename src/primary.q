@@ -29,6 +29,13 @@ system"l src/common/cgroup.q";
 .primary.tasktypes:`$"," vs getenv`TASK_TYPES;
 .primary.lasttaskid:0;
 .primary.resultsroot:getenv `RESULTS_DIR;
+.primary.memhistorymax:"J"$getenv`MEM_HISTORY_MAX;
+.primary.selfmem:0N;                               // the primary's own rssanon, bytes, from the last poll
+.primary.memcap:"J"$getenv`GLOBAL_MEM_LIMIT;       // the global cap in bytes
+.primary.paused:0b;                                // is dispatching new tasks held back by the mem cap
+.primary.pausedsince:0Np;                          // when the current pause started
+.primary.pausedtotal:0D;                           // total time spent paused
+.primary.pausecount:0;                             // how many times dispatch has paused
 
 
 // dict of secondaries ids to their pids that the primary started
@@ -192,16 +199,56 @@ system"l src/common/cgroup.q";
  };
 
 // hand a queued task to a secondary, do it by priority then by oldest first
+// nothing new runs when total mem is over the cap
 // will run on a timer every 1 sec
 .primary.dispatch:{
   freesec: exec id from secondaries where status=`free;
   if[not count freesec; :()];
-  qtasks: exec taskid from `priority xdesc 0!select priority from tasks where state=`queued;
+  qtasks: exec taskid from `priority xdesc 0!select taskid, priority from tasks where state=`queued;
   if[not count qtasks; :()];
-  //if[.primary.overcap[]; :()]; // will add in once we add in mem cap logic
+  if[.primary.overcap[]; :()];
   //qtasks:.primary.fit[qtasks; count freesec]; // will add in once we add in mem cap logic
   n:min count[freesec], count qtasks;
   .primary.sendtask'[n#freesec; n#qtasks];
+ };
+
+// Claude with minor edits from me
+// read our own memory and every live secondary's from /proc in one call, store it, and add a history row
+// works for busy secondaries too: nothing is asked of them. A pid that has gone gets nulls until .z.pc closes it
+.primary.pollmem:{
+  m:.mem.read .z.i, exec pid from secondaries where status<>`closed;
+  .primary.selfmem:first exec rssanon from m where pid=.z.i;
+  ra:exec pid!rssanon from m;
+  rs:exec pid!vmrss from m;
+  update rssanon:ra pid, vmrss:rs pid, memtime:.z.P from `secondaries where status<>`closed;
+  sec:exec sum rssanon from secondaries where status<>`closed;
+  `memhistory insert (.z.P; .primary.selfmem+sec; .primary.selfmem; sec; exec `int$count i from secondaries where status=`busy);
+  if[.primary.memhistorymax<n:count memhistory; delete from `memhistory where i<n-.primary.memhistorymax];
+ };
+
+// Claude with minor edits from me
+// bytes as whole MB, for logs
+.primary.mb:{string[`long$x%1048576],"MB"};
+
+// Claude with minor edits from me
+// total memory in use: the primary plus every live secondary, from the last poll, in bytes
+.primary.totalmem:{.primary.selfmem + exec sum rssanon from secondaries where status<>`closed};
+
+// Claude with minor edits from me
+// 1b if dispatch should hold back because total memory is over the cap; logs and times each pause and resume
+.primary.overcap:{
+  if[null .primary.memcap; :0b];
+  // the last poll can be up to a second old: if it says we're over, read again so a task that just finished counts
+  if[.primary.memcap<.primary.totalmem[]; .primary.pollmem[]];
+  tot:.primary.totalmem[];
+  overcap:tot>.primary.memcap;
+  if[overcap and not .primary.paused;
+    .primary.paused:1b; .primary.pausedsince:.z.P; .primary.pausecount+:1;
+    .log.warn "pausing dispatch: memory ",.primary.mb[tot]," is over the cap of ",.primary.mb .primary.memcap];
+  if[.primary.paused and not overcap;
+    .primary.paused:0b; .primary.pausedtotal+:.z.P-.primary.pausedsince;
+    .log.info "resuming dispatch: memory ",.primary.mb[tot]," is under the cap of ",.primary.mb[.primary.memcap],", was paused for ",string .z.P-.primary.pausedsince];
+  overcap
  };
 
 
@@ -233,8 +280,15 @@ system"l src/common/cgroup.q";
   if[.primary.spawnsecondaries; .primary.spawn each 1+til .primary.numsecondaries];
   .timer.addjob.custom[`stalecheck; {.primary.check[]}; (); 1; 2; ()!()];
   .timer.addjob.custom[`dispatch; {.primary.dispatch[]}; (); 1; 2; ()!()];
+  .timer.addjob.custom[`mempoll; {.primary.pollmem[]}; (); 1; 2; ()!()];
   .log.info "primary started, listening on ",string system "p";
  };
 
 // start primary
 .primary.start[];
+
+
+select id, status, rssanon from secondaries
+-1#memhistory
+tasks h
+select id, status, rssanon from secondaries
