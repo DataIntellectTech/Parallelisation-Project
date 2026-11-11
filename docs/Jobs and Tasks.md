@@ -25,7 +25,7 @@ When all secondaries are busy, tasks are marked as queued and will be executed o
 ### Running Tasks
 1. Normal task
 ```q
-.primary.newtask[tasktype:` sumtil; args: 1000]
+.primary.newtask ([tasktype:`sumtil; args:1000])
 ```
 
 2. Run multiple tasks at once
