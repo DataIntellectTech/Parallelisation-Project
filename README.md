@@ -105,6 +105,27 @@ A job is refused before anything runs if:
 2. Add its name to `TASK_TYPES`.
 3. Restart.
 
+## Memory polling
+
+All memory figures come from the kernel, in `/proc/<pid>/status`, in bytes. The framework doesn't use `.Q.w[]`: the kernel's figures are what it actually enforces, and they can be read from outside a process, which matters because a secondary running a task can't answer.
+
+| Figure | What it counts, in q terms |
+|---|---|
+| RssAnon | q's heap: vectors, tables, dicts and query results held in memory, plus IPC buffers. What `.Q.gc[]` gives back |
+| RssFile | memory-mapped files: HDB column files a query has touched, and anything `get` maps rather than copies. Shared between processes, and the kernel can drop it under pressure |
+| VmRSS | the two together |
+| VmHWM | the highest VmRSS since the peak was last reset |
+
+**Who reads what, and when**
+- **The primary,** every second: its own RssAnon, and every live secondary's, in one read. This includes busy secondaries, since nothing is asked of them. These readings feed the memory cap.
+- **Each idle secondary,** every couple of seconds: sends its RssAnon with its heartbeat.
+- **Each task,** recorded by its secondary:
+  - `membefore`: RssAnon just before the task. The peak is reset (`clear_refs`) at the same moment.
+  - `memafter`: VmHWM at the end, the task's peak. RssAnon is only a snapshot of one moment, and would miss a spike while the task runs. VmHWM is the kernel's own record of the highest point.
+  - `memaftergc`: RssAnon after the `.Q.gc[]` that follows the task.
+
+**A known overstatement.** A task's memory estimate is `memafter − membefore`. The peak includes file pages the task read, but "before" doesn't. So for a task that reads an HDB, the estimate is the heap it used **plus** the pages it touched: on a 31-day query, about 145MB more. For tasks that only compute, it's accurate. The kernel keeps no peak for the heap alone, and q's `.Q.w[]`peak` can't be reset for each task, so VmHWM is the only per-task peak available. The error is on the safe side: the cgroup counts file pages too, and an estimate that's too high holds tasks back rather than letting too many run.
+
 ## Tests
 
 ```bash
