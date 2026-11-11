@@ -226,15 +226,15 @@ system"l src/common/cgroup.q";
 
 // start sequence
 .primary.start:{
+  .primary.starttime:: .z.P;
   if[not count .primary.resultsroot; '"RESULTS_DIR is not set"];
-  .primary.resultsdir::.primary.resultsroot,"/",ssr[string .z.P;":";"."];
+  .primary.resultsdir::.primary.resultsroot,"/",ssr[string .primary.starttime;":";"."];
   .os.mkdir .primary.resultsdir;
   .log.info "task results will be saved in ",.primary.resultsdir;
   if[.primary.spawnsecondaries; .primary.spawn each 1+til .primary.numsecondaries];
   .timer.addjob.custom[`stalecheck; {.primary.check[]}; (); 1; 2; ()!()];
   .timer.addjob.custom[`dispatch; {.primary.dispatch[]}; (); 1; 2; ()!()];
   .log.info "primary started, listening on ",string system "p";
-  .primary.starttime:: .z.P;
  };
 
 // start primary
