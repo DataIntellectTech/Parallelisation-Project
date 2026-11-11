@@ -210,8 +210,14 @@ system"l src/common/cgroup.q";
 .z.pc:{[h]
   secid: first exec id from secondaries where handle=h;
   if[null secid; :()];
+  tid: first exec currenttask from `secondaries where id=secid;
   update status:`closed, handle:0Ni, currenttask: 0N from `secondaries where id=secid;
   .log.info "secondary ",string[secid]," has closed its connection to the primary";
+  if[not null tid;
+    r:([err:"secondary lost"; reason:`lost]);
+    .primary.taskupdate[tid; `failed; r];
+    .log.warn"task ",string[tid]," was on secondary ",string[secid]," marking it as failed due to ",string r`reason;
+   ];
  };
 
 // quitting the primary kills any spawned secondaries
