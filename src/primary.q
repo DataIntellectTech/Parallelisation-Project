@@ -286,9 +286,3 @@ system"l src/common/cgroup.q";
 
 // start primary
 .primary.start[];
-
-
-select id, status, rssanon from secondaries
--1#memhistory
-tasks h
-select id, status, rssanon from secondaries

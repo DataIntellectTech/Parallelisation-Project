@@ -8,7 +8,7 @@ One **primary** process and N **secondary** processes run on one machine.
 
 - **The primary** owns the task queue. It decides which task runs where and watches memory against a single cap for the primary and every secondary together. It holds back new work when that cap would be exceeded.
 - **The secondaries** run tasks, one at a time. They report back to the primary: status, memory, results. After each task they run `.Q.gc[]`, so its memory is returned before the next one.
-
+- **Global memory cap:** the primary reads its own and every secondary's memory every second, busy secondaries included. While the total is over `GLOBAL_MEM_LIMIT`, no new task is sent; dispatch resumes once memory falls back under. Tasks already running carry on.
 
 ## Getting started
 
@@ -117,14 +117,24 @@ All memory figures come from the kernel, in `/proc/<pid>/status`, in bytes. The 
 | VmHWM | the highest VmRSS since the peak was last reset |
 
 **Who reads what, and when**
-- **The primary,** every second: its own RssAnon, and every live secondary's, in one read. This includes busy secondaries, since nothing is asked of them. These readings feed the memory cap.
+- **The primary,** every second: its own RssAnon and every live secondary's, in one read, including busy secondaries, since nothing is asked of them. Each secondary's figure is kept in `secondaries`, and the total as a row in `memhistory` (the last `MEM_HISTORY_MAX` rows).
 - **Each idle secondary,** every couple of seconds: sends its RssAnon with its heartbeat.
 - **Each task,** recorded by its secondary:
-  - `membefore`: RssAnon just before the task. The peak is reset (`clear_refs`) at the same moment.
-  - `memafter`: VmHWM at the end, the task's peak. RssAnon is only a snapshot of one moment, and would miss a spike while the task runs. VmHWM is the kernel's own record of the highest point.
-  - `memaftergc`: RssAnon after the `.Q.gc[]` that follows the task.
+  - `membefore`: RssAnon just before the task. The peak is reset at the same moment;
+  - `memafter`: VmHWM at the end, the task's peak. RssAnon is only a snapshot of one moment, and would miss a spike while the task runs;
+  - `memaftergc`: RssAnon after the `.Q.gc[]` that follows the task. The primary uses it straight away, so freed memory counts before the next poll.
 
-**A known overstatement.** A task's memory estimate is `memafter − membefore`. The peak includes file pages the task read, but "before" doesn't. So for a task that reads an HDB, the estimate is the heap it used **plus** the pages it touched: on a 31-day query, about 145MB more. For tasks that only compute, it's accurate. The kernel keeps no peak for the heap alone, and q's `.Q.w[]`peak` can't be reset for each task, so VmHWM is the only per-task peak available. The error is on the safe side: the cgroup counts file pages too, and an estimate that's too high holds tasks back rather than letting too many run.
+**The global cap.** While the total (the primary plus every live secondary) is over `GLOBAL_MEM_LIMIT`, dispatch sends nothing new. It resumes when the total falls back under. Each pause and resume is logged, and counted in `.primary.pausecount` and `.primary.pausedtotal`. Tasks already running are never stopped: the cap only holds back new ones.
+
+```q
+-5#memhistory                                       / the last 5 seconds: total, primary, secondaries, busy
+select id, status, rssanon, memtime from secondaries
+.primary.pausecount                                 / how many times dispatch has paused
+```
+
+**A known overstatement.** A task's `memafter − membefore` includes file pages it read: the peak counts them, but "before" doesn't. For a task that reads an HDB, that's the heap it used **plus** the pages it touched: on a 31-day query, about 145MB more. For tasks that only compute, it's accurate. The kernel keeps no peak for the heap alone, and q's `.Q.w[]`peak` can't be reset for each task, so VmHWM is the only per-task peak available. The error is on the safe side.
+
+
 
 ## Tests
 
