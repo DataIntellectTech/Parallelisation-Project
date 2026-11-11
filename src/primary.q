@@ -150,10 +150,10 @@ system"l src/common/cgroup.q";
 // params allows us to update other columns eg. retriesmax and retrycount
 // if nothing for params it should be an empty dict
 .primary.taskupdate:{[tid; newstate; params]
-  if[not count exec taskid from tasks where taskid=tid; 
+  if[null tasks[tid]`state; 
     .log.warn"the task id ",string[tid]," is not present in the tasks table";
     :0b];
-  oldstate: first exec state from tasks where taskid=tid;
+  oldstate: tasks[tid]`state;
   if[not newstate in .primary.taskchange oldstate; 
     .log.warn"the new task state ",string[newstate]," is not a valid option, choose one of the following: ",", " sv string .primary.taskchange oldstate;
     :0b];
@@ -162,7 +162,7 @@ system"l src/common/cgroup.q";
   upsert[`tasks; params];
   .log.info "updated task id ",string[tid]," from ",string[oldstate]," to ",string newstate;
   if[newstate in `done`failed;
-    sid:first exec secondaryid from tasks where taskid=tid;
+    sid:tasks[tid]`secondaryid;
     update status:`free, currenttask:0N, lastheartbeat:.z.P from `secondaries where id=sid, currenttask=tid, status=`busy;
     // Claude as part of bench-401
     // the secondary has just given its memory back (.Q.gc[]): use its own after-gc figure until the next poll,
@@ -196,7 +196,7 @@ system"l src/common/cgroup.q";
 .primary.dispatch:{
   freesec: exec id from secondaries where status=`free;
   if[not count freesec; :()];
-  qtasks: exec taskid from `priority xdesc select taskid, priority from 0!tasks where state=`queued;
+  qtasks: exec taskid from `priority xdesc 0!select priority from tasks where state=`queued;
   if[not count qtasks; :()];
   //if[.primary.overcap[]; :()]; // will add in once we add in mem cap logic
   //qtasks:.primary.fit[qtasks; count freesec]; // will add in once we add in mem cap logic
