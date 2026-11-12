@@ -128,7 +128,7 @@ All memory figures come from the kernel, in `/proc/<pid>/status`, in bytes. The 
   - `memafter`: VmHWM at the end, the task's peak. RssAnon is only a snapshot of one moment, and would miss a spike while the task runs
   - `memaftergc`: RssAnon after the `.Q.gc[]` that follows the task. The primary uses it straight away, so freed memory counts before the next poll.
 
-**The global cap.** While the total (the primary plus every live secondary) is over `GLOBAL_MEM_LIMIT`, dispatch sends nothing new. It resumes when the total falls back under. Each pause and resume is logged, and counted in `.primary.pausecount` and `.primary.pausedtotal`. Tasks already running are never stopped: the cap only holds back new ones. `.primary.pausedtotal` covers finished payses; one still in progress started at `.primary.pausedsince`. Under a cgroup the kernals own cap (`CGROUP_MEM_LIMIT`) sits above this one, so the framework pauses before the kernal has to kill anything.
+**The global cap.** While the total (the primary plus every live secondary) is over `GLOBAL_MEM_LIMIT`, dispatch sends nothing new. It resumes when the total falls back under. Each pause and resume is logged, and counted in `.primary.pausecount` and `.primary.pausedtotal`. Tasks already running are never stopped: the cap only holds back new ones. `.primary.pausedtotal` covers finished pauses; one still in progress started at `.primary.pausedsince`. Under a cgroup, the kernel's own cap (`CGROUP_MEM_LIMIT`) sits above this one, so the framework pauses before the kernel has to kill anything.
 
 ```q
 -5#memhistory                                       / the last 5 readings: total, primary, secondaries, busy
