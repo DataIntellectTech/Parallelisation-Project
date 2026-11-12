@@ -202,11 +202,11 @@ system"l src/common/cgroup.q";
 // nothing new runs when total mem is over the cap
 // will run on a timer every 1 sec
 .primary.dispatch:{
+  if[.primary.overcap[]; :()];
   freesec: exec id from secondaries where status=`free;
   if[not count freesec; :()];
   qtasks: exec taskid from `priority xdesc 0!select taskid, priority from tasks where state=`queued;
   if[not count qtasks; :()];
-  if[.primary.overcap[]; :()];
   //qtasks:.primary.fit[qtasks; count freesec]; // will add in once we add in mem cap logic
   n:min count[freesec], count qtasks;
   .primary.sendtask'[n#freesec; n#qtasks];
