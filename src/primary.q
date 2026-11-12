@@ -29,6 +29,13 @@ system"l src/common/cgroup.q";
 .primary.tasktypes:`$"," vs getenv`TASK_TYPES;
 .primary.lasttaskid:0;
 .primary.resultsroot:getenv `RESULTS_DIR;
+.primary.memhistorymax:3600^"J"$getenv`MEM_HISTORY_MAX;
+.primary.selfmem:0N;                               // the primary's own rssanon, bytes, from the last poll
+.primary.memcap:"J"$getenv`GLOBAL_MEM_LIMIT;       // the global cap in bytes
+.primary.paused:0b;                                // is dispatching new tasks held back by the mem cap
+.primary.pausedsince:0Np;                          // when the current pause started
+.primary.pausedtotal:0D;                           // total time spent paused
+.primary.pausecount:0;                             // how many times dispatch has paused
 
 
 // dict of secondaries ids to their pids that the primary started
@@ -48,9 +55,9 @@ system"l src/common/cgroup.q";
 // .primary.register ([id:5; pid:4000i; host:`localhost])
 .primary.register:{[info]
   `secondaries upsert ([id: info`id; handle: .z.w; pid: info`pid; host: info`host; status: `free;
-    lastheartbeat: .z.P; consecutivefails: 0i; healthy: 1b; spawned: info[`id] in key .primary.spawned;
-    starttime: .z.P; registeredtime: .z.P; tasktypes: (); currenttask: 0N; rssanon: 0N; vmrss: 0N; memtime: 0Np]);
-  .log.info "secondary ", string[info`id], " registered at: ", string .z.P;
+    lastheartbeat: .z.p; consecutivefails: 0i; healthy: 1b; spawned: info[`id] in key .primary.spawned;
+    starttime: .z.p; registeredtime: .z.p; tasktypes: (); currenttask: 0N; rssanon: 0N; vmrss: 0N; memtime: 0Np]);
+  .log.info "secondary ", string[info`id], " registered at: ", string .z.p;
   .primary.resultsdir
  };
 
@@ -58,14 +65,14 @@ system"l src/common/cgroup.q";
 // called from the secondary like:
 // neg[.secondary.handle](`.primary.heartbeatcheck; .secondary.rssanon[])
 .primary.heartbeatcheck:{[mem]
-  update lastheartbeat:.z.P, rssanon:mem, memtime:.z.P from `secondaries where handle=.z.w;
+  update lastheartbeat:.z.p, rssanon:mem, memtime:.z.p from `secondaries where handle=.z.w;
   update status:`free from `secondaries where handle=.z.w, status=`stale;
  };
 
 // mark secondaries that arent sending updates as stale
 .primary.check:{
   if[not count secondaries; :()];
-  stale: exec id from secondaries where status=`free, lastheartbeat < .z.P - .primary.stale;
+  stale: exec id from secondaries where status=`free, lastheartbeat < .z.p - .primary.stale;
   if[count stale;
     update status:`stale from `secondaries where id in stale;
     .log.warn "no heartbeat from secondary ",(", " sv string stale)];
@@ -95,7 +102,7 @@ system"l src/common/cgroup.q";
     .log.warn "secondary ",string[x]," already exists; next available id is ",string .primary.nextid[];
     :()];
   .os.mkdir .primary.logdir;
-  logfile:.primary.logdir,"/sec",string[x],".",ssr[19#string .z.P;":";"."],".log";
+  logfile:.primary.logdir,"/sec",string[x],".",ssr[19#string .z.p;":";"."],".log";
   startcmd:.primary.spawncmd[x]," < /dev/null >> ",logfile," 2>&1 & echo $!";
   pid:"I"$first system startcmd;
   .log.info "running system command: ", startcmd;
@@ -139,7 +146,7 @@ system"l src/common/cgroup.q";
     .log.warn "newtask: unknown fields ",", " sv string bad; :0N];
   tid:.primary.nexttaskid[];
   data:.primary.taskdefaults,task,
-    ([taskid:tid; args:enlist task`args; submittedtime:.z.P; retrycount:0i; state:`queued; secondaryid:0N; dispatchedtime:0Np; startedtime:0Np;
+    ([taskid:tid; args:enlist task`args; submittedtime:.z.p; retrycount:0i; state:`queued; secondaryid:0N; dispatchedtime:0Np; startedtime:0Np;
     finishedtime:0Np; membefore:0N; memafter:0N; memaftergc:0N; err:""; reason:`; resultpath:`; resultbytes:0N; jobid:0N; user:`]);
   `tasks upsert data;
   .log.debug "new task ",string[tid]," ",string task`tasktype;
@@ -157,13 +164,13 @@ system"l src/common/cgroup.q";
   if[not newstate in .primary.taskchange oldstate; 
     .log.warn"the new task state ",string[newstate]," is not a valid option, choose one of the following: ",", " sv string .primary.taskchange oldstate;
     :0b];
-  timecol: $[newstate in key .primary.statustime; (enlist .primary.statustime newstate)!enlist .z.P; ()!()];
+  timecol: $[newstate in key .primary.statustime; (enlist .primary.statustime newstate)!enlist .z.p; ()!()];
   params: params, timecol, ([taskid: tid; state: newstate]);
   upsert[`tasks; params];
   .log.info "updated task id ",string[tid]," from ",string[oldstate]," to ",string newstate;
   if[newstate in `done`failed;
     sid:tasks[tid]`secondaryid;
-    update status:`free, currenttask:0N, lastheartbeat:.z.P from `secondaries where id=sid, currenttask=tid, status=`busy;
+    update status:`free, currenttask:0N, lastheartbeat:.z.p from `secondaries where id=sid, currenttask=tid, status=`busy;
     // Claude as part of bench-401
     // the secondary has just given its memory back (.Q.gc[]): use its own after-gc figure until the next poll,
     // so dispatch sees the freed memory straight away instead of the last poll's reading
@@ -192,16 +199,56 @@ system"l src/common/cgroup.q";
  };
 
 // hand a queued task to a secondary, do it by priority then by oldest first
+// nothing new runs when total mem is over the cap
 // will run on a timer every 1 sec
 .primary.dispatch:{
+  if[.primary.overcap[]; :()];
   freesec: exec id from secondaries where status=`free;
   if[not count freesec; :()];
-  qtasks: exec taskid from `priority xdesc 0!select priority from tasks where state=`queued;
+  qtasks: exec taskid from `priority xdesc 0!select taskid, priority from tasks where state=`queued;
   if[not count qtasks; :()];
-  //if[.primary.overcap[]; :()]; // will add in once we add in mem cap logic
   //qtasks:.primary.fit[qtasks; count freesec]; // will add in once we add in mem cap logic
   n:min count[freesec], count qtasks;
   .primary.sendtask'[n#freesec; n#qtasks];
+ };
+
+// Claude with minor edits from me
+// read our own memory and every live secondary's from /proc in one call, store it, and add a history row
+// works for busy secondaries too: nothing is asked of them. A pid that has gone gets nulls until .z.pc closes it
+.primary.pollmem:{
+  m:.mem.read .z.i, exec pid from secondaries where status<>`closed;
+  .primary.selfmem:first exec rssanon from m where pid=.z.i;
+  ra:exec pid!rssanon from m;
+  rs:exec pid!vmrss from m;
+  update rssanon:ra pid, vmrss:rs pid, memtime:.z.p from `secondaries where status<>`closed;
+  sec:exec sum rssanon from secondaries where status<>`closed;
+  `memhistory insert (.z.p; .primary.selfmem+sec; .primary.selfmem; sec; exec `int$count i from secondaries where status=`busy);
+  if[.primary.memhistorymax<n:count memhistory; delete from `memhistory where i<n-.primary.memhistorymax];
+ };
+
+// Claude with minor edits from me
+// bytes as whole MB, for logs
+.primary.mb:{string[`long$x%1048576],"MB"};
+
+// Claude with minor edits from me
+// total memory in use: the primary plus every live secondary, from the last poll, in bytes
+.primary.totalmem:{(0^.primary.selfmem) + exec sum rssanon from secondaries where status<>`closed};
+
+// Claude with minor edits from me
+// 1b if dispatch should hold back because total memory is over the cap; logs and times each pause and resume
+.primary.overcap:{
+  if[null .primary.memcap; :0b];
+  // the last poll can be up to a second old: if it says we're over, read again so a task that just finished counts
+  if[.primary.memcap<.primary.totalmem[]; .primary.pollmem[]];
+  tot:.primary.totalmem[];
+  overcap:tot>.primary.memcap;
+  if[overcap and not .primary.paused;
+    .primary.paused:1b; .primary.pausedsince:.z.p; .primary.pausecount+:1;
+    .log.warn "pausing dispatch: memory ",.primary.mb[tot]," is over the cap of ",.primary.mb .primary.memcap];
+  if[.primary.paused and not overcap;
+    .primary.paused:0b; .primary.pausedtotal+:.z.p-.primary.pausedsince;
+    .log.info "resuming dispatch: memory ",.primary.mb[tot]," is under the cap of ",.primary.mb[.primary.memcap],", was paused for ",string .z.p-.primary.pausedsince];
+  overcap
  };
 
 
@@ -225,14 +272,16 @@ system"l src/common/cgroup.q";
 
 // start sequence
 .primary.start:{
-  .primary.starttime:: .z.P;
+  .primary.starttime:: .z.p;
   if[not count .primary.resultsroot; '"RESULTS_DIR is not set"];
   .primary.resultsdir::.primary.resultsroot,"/",ssr[string .primary.starttime;":";"."];
   .os.mkdir .primary.resultsdir;
   .log.info "task results will be saved in ",.primary.resultsdir;
+  .primary.pollmem[];
   if[.primary.spawnsecondaries; .primary.spawn each 1+til .primary.numsecondaries];
   .timer.addjob.custom[`stalecheck; {.primary.check[]}; (); 1; 2; ()!()];
   .timer.addjob.custom[`dispatch; {.primary.dispatch[]}; (); 1; 2; ()!()];
+  .timer.addjob.custom[`mempoll; {.primary.pollmem[]}; (); 1; 2; ()!()];
   .log.info "primary started, listening on ",string system "p";
  };
 

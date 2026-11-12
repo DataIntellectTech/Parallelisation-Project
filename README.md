@@ -6,9 +6,9 @@ Build a pure q parallelisation framework with a primary process that can spin up
 
 One **primary** process and N **secondary** processes run on one machine.
 
-- **The primary** owns the task queue. It decides which task runs where and watches memory against a single cap for the primary and every secondary together. It holds back new work when that cap would be exceeded.
+- **The primary** owns the task queue. It decides which task runs where and watches memory against one cap for the primary and every secondary together (`GLOBAL_MEM_LIMIT`). It holds back new work while memory is over that cap.
 - **The secondaries** run tasks, one at a time. They report back to the primary: status, memory, results. After each task they run `.Q.gc[]`, so its memory is returned before the next one.
-
+- **Global memory cap:** the primary reads its own and every secondary's memory every second, busy secondaries included. While the total is over `GLOBAL_MEM_LIMIT`, no new task is sent; dispatch resumes once memory falls back under. Tasks already running carry on.
 
 ## Getting started
 
@@ -26,7 +26,8 @@ Then edit `config/default.env`. These are the settings to look at first:
 |---|---|
 | `PRIMARY_PORT` | the port the primary listens on |
 | `NUM_SECONDARYS` | how many secondaries the primary starts |
-| `GLOBAL_MEM_LIMIT` | the memory cap in bytes, for the primary and every secondary together; empty means no cap |
+| `GLOBAL_MEM_LIMIT` | the frameworks memory cap in bytes, for the primary and every secondary together; empty means no cap |
+| `CGROUP_MEM_LIMIT` | the kernals memory cap in bytes, used when starting under a cgroup: above it, the kernal kills a secondary. Must be above `GLOBAL_MEM_LIMIT`, roughly x1.25 |
 | `RESULTS_DIR` | where task results are saved |
 | `TASK_TYPES` | the task types users may run |
 | `HDB_DIR` | an HDB for the secondaries to load, if your tasks need one |
@@ -44,8 +45,11 @@ set -a; source config/default.env; set +a
 x src/primary.q -p $PRIMARY_PORT
 
 # start with cgroups and a memory cap
-systemd-run --user --scope -p MemoryMax=$GLOBAL_MEM_LIMIT -p MemorySwapMax=0 $KDBX_HOME/bin/q src/primary.q -p $PRIMARY_PORT
+systemd-run --user --scope -p MemoryMax=$CGROUP_MEM_LIMIT -p MemorySwapMax=0 $KDBX_HOME/bin/q src/primary.q -p $PRIMARY_PORT
 ```
+
+There are two caps. `GLOBAL_MEM_LIMIT` is the framework's: above it, dispatch pauses. `CGROUP_MEM_LIMIT` is the kernel's: above it, the kernel kills a process in the cgroup (a secondary, never the primary). The kernel's cap must be higher. With swap off, the kernel acts the moment a process tries to go past its cap, so if the two were equal, the framework would never get to pause. The gap gives tasks already running room to keep growing after dispatch has paused.
+
 
 After starting the primary it will spin up secondaries itself, current default amount is 8.
 
@@ -117,14 +121,22 @@ All memory figures come from the kernel, in `/proc/<pid>/status`, in bytes. The 
 | VmHWM | the highest VmRSS since the peak was last reset |
 
 **Who reads what, and when**
-- **The primary,** every second: its own RssAnon, and every live secondary's, in one read. This includes busy secondaries, since nothing is asked of them. These readings feed the memory cap.
+- **The primary,** every second: its own RssAnon and every live secondary's, in one read, including busy secondaries, since nothing is asked of them. Each secondary's figure is kept in `secondaries`, and the total as a row in `memhistory` (the last `MEM_HISTORY_MAX` rows).
 - **Each idle secondary,** every couple of seconds: sends its RssAnon with its heartbeat.
 - **Each task,** recorded by its secondary:
-  - `membefore`: RssAnon just before the task. The peak is reset (`clear_refs`) at the same moment.
-  - `memafter`: VmHWM at the end, the task's peak. RssAnon is only a snapshot of one moment, and would miss a spike while the task runs. VmHWM is the kernel's own record of the highest point.
-  - `memaftergc`: RssAnon after the `.Q.gc[]` that follows the task.
+  - `membefore`: RssAnon just before the task. The peak is reset (`clear_refs`) at the same moment
+  - `memafter`: VmHWM at the end, the task's peak. RssAnon is only a snapshot of one moment, and would miss a spike while the task runs
+  - `memaftergc`: RssAnon after the `.Q.gc[]` that follows the task. The primary uses it straight away, so freed memory counts before the next poll.
 
-**A known overstatement.** A task's memory estimate is `memafter − membefore`. The peak includes file pages the task read, but "before" doesn't. So for a task that reads an HDB, the estimate is the heap it used **plus** the pages it touched: on a 31-day query, about 145MB more. For tasks that only compute, it's accurate. The kernel keeps no peak for the heap alone, and q's `.Q.w[]`peak` can't be reset for each task, so VmHWM is the only per-task peak available. The error is on the safe side: the cgroup counts file pages too, and an estimate that's too high holds tasks back rather than letting too many run.
+**The global cap.** While the total (the primary plus every live secondary) is over `GLOBAL_MEM_LIMIT`, dispatch sends nothing new. It resumes when the total falls back under. Each pause and resume is logged, and counted in `.primary.pausecount` and `.primary.pausedtotal`. Tasks already running are never stopped: the cap only holds back new ones. `.primary.pausedtotal` covers finished pauses; one still in progress started at `.primary.pausedsince`. Under a cgroup, the kernel's own cap (`CGROUP_MEM_LIMIT`) sits above this one, so the framework pauses before the kernel has to kill anything.
+
+```q
+-5#memhistory                                       / the last 5 readings: total, primary, secondaries, busy
+select id, status, rssanon, memtime from secondaries
+.primary.pausecount                                 / how many times dispatch has paused
+```
+
+**A known overstatement.** A task's `memafter − membefore` includes file pages it read: the peak counts them, but "before" doesn't. For a task that reads an HDB, that's the heap it used **plus** the pages it touched: on a 31-day query, about 145MB more. For tasks that only compute, it's accurate. The kernel keeps no peak for the heap alone, and q's `.Q.w[]`peak` can't be reset for each task, so VmHWM is the only per-task peak available. The error is on the safe side: the cgroup counts file pages too, and an estimate thats too high holds tasks back rather than letting too many run.
 
 ## Tests
 
