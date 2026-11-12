@@ -6,7 +6,7 @@ Build a pure q parallelisation framework with a primary process that can spin up
 
 One **primary** process and N **secondary** processes run on one machine.
 
-- **The primary** owns the task queue. It decides which task runs where and watches memory against a single cap for the primary and every secondary together. “It holds back new work while memory is over that cap.
+- **The primary** owns the task queue. It decides which task runs where and watches memory against one cap for the primary and every secondary together (`GLOBAL_MEM_LIMIT`). It holds back new work while memory is over that cap.
 - **The secondaries** run tasks, one at a time. They report back to the primary: status, memory, results. After each task they run `.Q.gc[]`, so its memory is returned before the next one.
 - **Global memory cap:** the primary reads its own and every secondary's memory every second, busy secondaries included. While the total is over `GLOBAL_MEM_LIMIT`, no new task is sent; dispatch resumes once memory falls back under. Tasks already running carry on.
 
@@ -131,7 +131,7 @@ All memory figures come from the kernel, in `/proc/<pid>/status`, in bytes. The 
 **The global cap.** While the total (the primary plus every live secondary) is over `GLOBAL_MEM_LIMIT`, dispatch sends nothing new. It resumes when the total falls back under. Each pause and resume is logged, and counted in `.primary.pausecount` and `.primary.pausedtotal`. Tasks already running are never stopped: the cap only holds back new ones. `.primary.pausedtotal` covers finished payses; one still in progress started at `.primary.pausedsince`. Under a cgroup the kernals own cap (`CGROUP_MEM_LIMIT`) sits above this one, so the framework pauses before the kernal has to kill anything.
 
 ```q
--5#memhistory                                       / the last 5 seconds: total, primary, secondaries, busy
+-5#memhistory                                       / the last 5 readings: total, primary, secondaries, busy
 select id, status, rssanon, memtime from secondaries
 .primary.pausecount                                 / how many times dispatch has paused
 ```

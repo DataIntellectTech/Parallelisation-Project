@@ -112,7 +112,7 @@ One row per job, added by `.primary.newjob`.
 
 ## memhistory
 
-One row per memory poll (`.primary.pollmem`, every second), so memory can be looked at over time. Only the last `MEM_HISTORY_MAX` rows are kept.
+One row per memory poll (`.primary.pollmem`, every read), so memory can be looked at over time. Only the last `MEM_HISTORY_MAX` rows are kept. Memory is read on a timer every second by `.primary.pollmem`. When dispatch is paused/memory is over the cap every dispatch also reads memory again deciding wheter to resume. This is useful as we can see memory coming down as tasks finish.
 
 <!-- check these column names against schemas/primarytables.q -->
 
