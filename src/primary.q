@@ -36,6 +36,8 @@ system"l src/common/cgroup.q";
 .primary.pausedsince:0Np;                          // when the current pause started
 .primary.pausedtotal:0D;                           // total time spent paused
 .primary.pausecount:0;                             // how many times dispatch has paused
+.primary.secondarystates:`free`busy`stale`closed;
+.primary.taskstates:`queued`dispatched`running`done`failed;
 
 
 // dict of secondaries ids to their pids that the primary started
@@ -49,6 +51,9 @@ system"l src/common/cgroup.q";
 
 // the time column that gets updated at each task status
 .primary.statustime:([dispatched: `dispatchedtime; running: `startedtime; done: `finishedtime; failed: `finishedtime]);
+
+// restarts so far, by secondary id
+.primary.respawns:(`long$())!`long$();
 
 // when a secondary starts add it to the secondaries table
 // example run:
@@ -76,6 +81,34 @@ system"l src/common/cgroup.q";
   if[count stale;
     update status:`stale from `secondaries where id in stale;
     .log.warn "no heartbeat from secondary ",(", " sv string stale)];
+ };
+
+// how many of each state appear in the status col, done like this so can have 0 for failed say if no failed in the status col
+.primary.countby:{[states;statuscol] states!sum each statuscol=/:states};
+
+// a snapshot of the primarys status
+// memory is in bytes headroom how far under the cap we are
+.primary.status:{
+  secs:select id, pid, status, spawned, currenttask, rssanon, restarts:0^.primary.respawns id, lastseen:`time$.z.p-lastheartbeat from 0!secondaries;
+  tot:.primary.totalmem[];
+  mem:([total:tot; cap:.primary.memcap; headroom:.primary.memcap-tot; primary:.primary.selfmem]);
+  pt:.primary.pausedtotal+$[.primary.paused; .z.p-.primary.pausedsince; 0D];
+  disp:([paused:.primary.paused; pausecount:.primary.pausecount; pausedtotal:pt; pausedsince:.primary.pausedsince]);
+  ([time: .z.p; uptime: .z.p - .primary.starttime; memory: mem; dispatch: disp; secondaries: secs; seccounts: .primary.countby[.primary.secondarystates;exec status from secondaries]; taskcounts: .primary.countby[.primary.taskstates;exec state from tasks]])
+ };
+
+// the same snapshot, printed for a person at the console
+.primary.showstatus:{
+  pristatus:.primary.status[];
+  fmt:{[d] ", " sv {[d;k] string[d k]," ",string k}[d] each key d};
+  -1 "== primary status ",string[pristatus`time],"  uptime ",string[pristatus`uptime]," ==";
+  m:pristatus`memory;
+  -1 "memory: ",.primary.mb[m`total]," in use, ",$[null m`cap; "no cap"; .primary.mb[m`cap]," cap, ",.primary.mb[m`headroom]," headroom"];
+  d:pristatus`dispatch;
+  -1 "dispatch: ",$[d`paused; "PAUSED (memory over the cap) since ",string d`pausedsince; "running"],", paused ",string[d`pausecount]," times for ",string d`pausedtotal;
+  -1 "secondaries: ",fmt pristatus`seccounts;
+  show `id xasc select id, pid, status, spawned, task:currenttask, memmb:0.1*floor 0.5+10*rssanon%1048576, restarts, lastseen from pristatus`secondaries;
+  -1 "tasks: ",fmt pristatus`taskcounts;
  };
 
 // used to start a secondary process
