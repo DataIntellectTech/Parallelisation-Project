@@ -109,6 +109,34 @@ A job is refused before anything runs if:
 2. Add its name to `TASK_TYPES`.
 3. Restart.
 
+## Status
+
+`.primary.status[]` returns a snapshot of the primary as a dict, for code to read:
+
+| Key | What it holds |
+|---|---|
+| `time`, `uptime` | when the snapshot was taken (UTC) and how long the primary has been running |
+| `memory` | `total` in use (the primary plus every live secondary, RssAnon, bytes), `cap` (`GLOBAL_MEM_LIMIT`), `headroom` (cap minus total), `primary` (the primary's own) |
+| `dispatch` | `paused`, `pausecount`, `pausedtotal` (includes the current pause), `pausedsince` |
+| `secondaries` | one row per secondary: id, pid, status, spawned, current task, rssanon, restarts, time since its last heartbeat (`lastseen`) |
+| `seccounts` | how many secondaries are free, busy, stale and closed |
+| `taskcounts` | how many tasks are queued, dispatched, running, done and failed |
+
+`.primary.showstatus[]` prints the same snapshot for a person at the console:
+
+    == primary status 2026.11.13D13:51:09.408361778  uptime 0D00:01:29.987809969 ==
+    memory: 17MB in use, 4096MB cap, 4079MB headroom
+    dispatch: running, paused 0 times for 0D00:00:00.000000000
+    secondaries: 8 free, 0 busy, 0 stale, 0 closed
+    id pid     status spawned task memmb restarts lastseen
+    ----------------------------------------------------------
+    1  3775257 free   1            2.1   0        00:00:00.641
+    ...
+    tasks: 0 queued, 0 dispatched, 0 running, 1 done, 1 failed
+
+`restarts` stays 0 until restarting lost secondaries is added. A closed secondary keeps its
+last memory reading in the table but is not counted in the total.
+
 ## Memory polling
 
 All memory figures come from the kernel, in `/proc/<pid>/status`, in bytes. The framework doesn't use `.Q.w[]`: the kernel's figures are what it actually enforces, and they can be read from outside a process, which matters because a secondary running a task can't answer.
