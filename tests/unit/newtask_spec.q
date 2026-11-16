@@ -64,6 +64,10 @@ if[not `primary in key `; system "l src/primary.q"];
     ids:.primary.newtask each ([] tasktype:`sum`fail`sleep; args:(100;::;`a`b));
     (100;::;`a`b) mustmatch first each tasks[([] taskid:ids)]`args;
     };
+  should["show new tasks as queued in the status counts"]{
+    .primary.newtask each ([] tasktype:`sum`sum; args:(1;2));
+    2i musteq .primary.status[][`taskcounts;`queued];
+    };
  };
 
 .tst.desc[".primary.newtask - rejected tasks"]{
