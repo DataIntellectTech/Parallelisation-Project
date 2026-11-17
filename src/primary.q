@@ -30,15 +30,18 @@ system"l src/common/cgroup.q";
 .primary.lasttaskid:0;
 .primary.resultsroot:getenv `RESULTS_DIR;
 .primary.memhistorymax:3600^"J"$getenv`MEM_HISTORY_MAX;
-.primary.selfmem:0N;                               // the primary's own rssanon, bytes, from the last poll
-.primary.memcap:"J"$getenv`GLOBAL_MEM_LIMIT;       // the global cap in bytes
-.primary.paused:0b;                                // is dispatching new tasks held back by the mem cap
-.primary.pausedsince:0Np;                          // when the current pause started
-.primary.pausedtotal:0D;                           // total time spent paused
-.primary.pausecount:0;                             // how many times dispatch has paused
+.primary.selfmem:0N;                                        // the primary's own rssanon, bytes, from the last poll
+.primary.memcap:"J"$getenv`GLOBAL_MEM_LIMIT;                // the global cap in bytes
+.primary.paused:0b;                                         // is dispatching new tasks held back by the mem cap
+.primary.pausedsince:0Np;                                   // when the current pause started
+.primary.pausedtotal:0D;                                    // total time spent paused
+.primary.pausecount:0;                                      // how many times dispatch has paused
 .primary.secondarystates:`free`busy`stale`closed;
 .primary.taskstates:`queued`dispatched`running`done`failed;
-
+.primary.retryreasons:`$"," vs getenv`RETRY_REASONS;
+.primary.respawnmax:"J"$getenv`RESPAWN_MAX;                 // restarts allowed per spawned secondary; 0 or unset = never
+.primary.cgroupcap:"J"$getenv`CGROUP_MEM_LIMIT;             // the kernel's cap (MemoryMax), recorded as an oom-killed task's memafter
+.primary.oomkills:0N;                                       // the cgroup's oom_kill count at the last check
 
 // dict of secondaries ids to their pids that the primary started
 .primary.spawned:(`long$())!`int$();
@@ -148,7 +151,7 @@ system"l src/common/cgroup.q";
 .primary.stop:{
   .log.info "stopping secondaries";
   handles:exec handle from secondaries where not null handle, not status=`closed;
-  {[h] @[neg[h];(`.secondary.stop;::);{[e] ::}]} each handles;
+  {[h] @[{[h] neg[h](`.secondary.stop;::); neg[h][]}; h; {[e] ::}]} each handles;
   .os.sleep .primary.stopgraceperiod;
   left:p where .os.exists each "/proc/",/:string p:value .primary.spawned;
   if[count left;
@@ -209,7 +212,7 @@ system"l src/common/cgroup.q";
     // so dispatch sees the freed memory straight away instead of the last poll's reading
     if[`memaftergc in key params;
       if[not null params`memaftergc; update rssanon:params`memaftergc from `secondaries where id=sid]]];
-  //if[newstate=`failed; .primary.retry tid]; // will add once we add in retry logic
+  if[newstate=`failed; .primary.retry tid];
   //if[newstate in `done`failed; .primary.jobcheck tid]; // will add in once adding jobs bit
   if[newstate in `done`failed; .primary.dispatch[]];  // prevents us waiting on the timer, when bench marking this was the biggest this was biggest bottleneck so added it
   1b
@@ -243,6 +246,58 @@ system"l src/common/cgroup.q";
   //qtasks:.primary.fit[qtasks; count freesec]; // will add in once we add in mem cap logic
   n:min count[freesec], count qtasks;
   .primary.sendtask'[n#freesec; n#qtasks];
+ };
+
+// rerun a failed task if its reason is in RETRY_REASONS and it has retries left
+.primary.retry:{[tid]
+  t:tasks tid;
+  if[not t[`reason] in .primary.retryreasons; :0b];
+  if[t[`retrycount]>=t`retriesmax;
+    .log.warn "task ",string[tid]," has used all ",string[t`retriesmax]," retries, leaving it failed";
+    :0b];
+  .log.info "retrying task ",string[tid],", retry ",string[1+t`retrycount]," of ",string t`retriesmax;
+  .primary.taskupdate[tid; `queued; ([retrycount:1i+t`retrycount; secondaryid:0N; dispatchedtime:0Np; startedtime:0Np; finishedtime:0Np; membefore:0N; memafter:0N; memaftergc:0N; err:""; reason:`])];
+ };
+
+// Claude with minor edits from me
+// fail tasks that have run past their timeout. A busy secondary can't be interrupted, so its process is killed.
+// Counts from startedtime, or dispatchedtime if the secondary never reported running
+.primary.checktimeouts:{
+  late:0!select taskid, secondaryid, timeout from tasks where state in `dispatched`running, .z.p>timeout + dispatchedtime^startedtime;
+  if[not count late; :()];
+  .primary.timeout'[late`taskid; late`secondaryid; late`timeout];
+ };
+
+// Claude with minor edits from me
+// time out one task: take its secondary out of use and fail the task first, then kill the process.
+// .z.pc fires once the process is dead, finds no task to fail as lost, and restarts the secondary
+.primary.timeout:{[tid;sid;t]
+  pid:first exec pid from secondaries where id=sid;
+  .log.warn "task ",string[tid]," on secondary ",string[sid]," has run past its timeout of ",string[t],", killing pid ",string pid;
+  update status:`closed, currenttask:0N from `secondaries where id=sid;
+  .primary.taskupdate[tid; `failed; ([err:"timed out after ",string t; reason:`timeout])];
+  @[.os.kill9; pid; {[e] .log.warn "could not kill secondary: ",e}];
+ };
+
+// restart a spawned secondary that has died, at most RESPAWN_MAX times each
+.primary.respawnsecondary:{[sid]
+  if[not sid in key .primary.spawned; :()];
+  n:0^.primary.respawns sid;
+  if[not n < .primary.respawnmax;
+    .log.warn "secondary ",string[sid]," has been restarted ",string[n]," times already, max secondary restarts is ",string .primary.respawnmax;
+    :()];
+  .primary.respawns[sid]:n+1;
+  .log.info "restarting secondary ",string[sid],", restart ",string[n+1]," of ",string .primary.respawnmax;
+  .primary.spawn sid;
+ };
+
+// checks if the kernal has killed a process in our cgroup since the last check
+.primary.oomkilled:{
+  n:.cgroup.oomkills .primary.cgroupdir;
+  if[null n; :0b];
+  if[n<=.primary.oomkills; :0b];
+  .primary.oomkills+:1;
+  1b
  };
 
 // Claude with minor edits from me
@@ -285,18 +340,23 @@ system"l src/common/cgroup.q";
  };
 
 
-// if a secondary loses connection mark it as closed
+// if a secondary loses connection mark it as closed, fail its task and try to respawn it if under RESPAWN_MAX
+// a task that fails due to oom is not retried
 .z.pc:{[h]
   secid: first exec id from secondaries where handle=h;
   if[null secid; :()];
   tid: first exec currenttask from `secondaries where id=secid;
   update status:`closed, handle:0Ni, currenttask: 0N from `secondaries where id=secid;
-  .log.info "secondary ",string[secid]," has closed its connection to the primary";
+  oom:.primary.oomkilled[];
+  .log.info "secondary ",string[secid]," has closed its connection to the primary",$[oom; ": killed by the kernel for using too much memory"; ""];
   if[not null tid;
-    r:([err:"secondary lost"; reason:`lost]);
+    r:$[oom;
+      ([err:"secondary killed by the kernel for using too much memory"; reason:`oom; memafter:.primary.memcap^.primary.cgroupcap]);
+      ([err:"secondary lost"; reason:`lost])];
     .primary.taskupdate[tid; `failed; r];
-    .log.warn"task ",string[tid]," was on secondary ",string[secid]," marking it as failed due to ",string r`reason;
+    .log.warn"task ",string[tid]," was on secondary ",string[secid]," marked it as failed due to ",string r`reason;
    ];
+  .primary.respawnsecondary secid;
  };
 
 // quitting the primary kills any spawned secondaries
@@ -311,10 +371,13 @@ system"l src/common/cgroup.q";
   .os.mkdir .primary.resultsdir;
   .log.info "task results will be saved in ",.primary.resultsdir;
   .primary.pollmem[];
+  .primary.cgroupdir:: .cgroup.dir[];
+  .primary.oomkills:: .cgroup.oomkills .primary.cgroupdir;
   if[.primary.spawnsecondaries; .primary.spawn each 1+til .primary.numsecondaries];
   .timer.addjob.custom[`stalecheck; {.primary.check[]}; (); 1; 2; ()!()];
   .timer.addjob.custom[`dispatch; {.primary.dispatch[]}; (); 1; 2; ()!()];
   .timer.addjob.custom[`mempoll; {.primary.pollmem[]}; (); 1; 2; ()!()];
+  .timer.addjob.custom[`timeoutcheck; {.primary.checktimeouts[]}; (); 1; 2; ()!()];
   .log.info "primary started, listening on ",string system "p";
  };
 

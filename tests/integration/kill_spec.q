@@ -1,8 +1,7 @@
 system "l tests/helpers/it.q";
-/ integration: the brief's secondary kill - kill a secondary mid-task, check its task fails as lost
-/ and the rest of the work still finishes on the others
+/ integration: the brief's secondary kill - kill a secondary mid-task, check its task is retried and finishes
 / run with: bash tests/integration.sh kill
-/ retrying the lost task comes with the failures PR, which changes this spec to expect a retry
+/ needs lost in RETRY_REASONS and TASK_RETRIES_MAX of 1 or more (the defaults)
 
 .kl.wait:{[f;secs] end:.z.p+`timespan$1e9*secs; while[(not f[]) and .z.p<end; system "sleep 0.2"]; f[]};
 / queue one task per arg on the primary, returns their ids
@@ -14,7 +13,7 @@ system "l tests/helpers/it.q";
 .kl.running:{.it.q ({first 0!select id, pid, currenttask from secondaries where status=`busy, not null currenttask,
   currenttask in exec taskid from tasks where state=`running}; ::)};
 
-.tst.desc["secondary kill: a task on a killed secondary fails as lost, and the rest still finish"]{
+.tst.desc["secondary kill: a task on a killed secondary is retried and finishes"]{
   should["have every spawned secondary registered and free"]{
     1b musteq .it.ready[];
     `.kl.n set count .kl.secs[];
@@ -29,15 +28,16 @@ system "l tests/helpers/it.q";
     / its connection closes: the primary marks it closed
     1b musteq .kl.wait[{`closed~first exec status from .kl.secs[] where id=.kl.victim`id}; 15];
     };
-  should["fail its task as lost"]{
+  should["retry its task on another secondary, and finish it"]{
     1b musteq .kl.wait[{.kl.finished .kl.ids}; 60];
     t:first select from .kl.tasks[.kl.ids] where taskid=.kl.victim`currenttask;
-    `failed musteq t`state;
-    `lost musteq t`reason;
+    `done musteq t`state;
+    1i musteq t`retrycount;
+    1b musteq not t[`secondaryid]=.kl.victim`id;
     };
-  should["finish every other task on the secondaries still running"]{
-    t:select from .kl.tasks[.kl.ids] where taskid<>.kl.victim`currenttask;
+  should["finish every other task without a retry"]{
+    t:.kl.tasks .kl.ids;
     1b musteq all `done=t`state;
-    0b musteq any (.kl.victim`id)=t`secondaryid;
+    1i musteq sum t`retrycount;
     };
   };

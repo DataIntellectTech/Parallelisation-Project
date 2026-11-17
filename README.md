@@ -14,6 +14,8 @@ One **primary** process and N **secondary** processes run on one machine.
 
 **Pre-requisites**
 - KDB-X, with `KDBX_HOME` set. The framework uses its `kx.log`, `di.timer` and `di.os` modules.
+- Linux. Memory figures are read from `/proc`, and the kernel's memory cap uses cgroups v2.
+- For the kernel's memory cap, a systemd user session (`systemd-run --user`). This part is optional: without it, start with `USE_CGROUP=0` and only the framework's cap applies.
 
 **Set up:**
 ```bash
@@ -27,7 +29,7 @@ Then edit `config/default.env`. These are the settings to look at first:
 | `PRIMARY_PORT` | the port the primary listens on |
 | `NUM_SECONDARYS` | how many secondaries the primary starts |
 | `GLOBAL_MEM_LIMIT` | the frameworks memory cap in bytes, for the primary and every secondary together; empty means no cap |
-| `CGROUP_MEM_LIMIT` | the kernals memory cap in bytes, used when starting under a cgroup: above it, the kernal kills a secondary. Must be above `GLOBAL_MEM_LIMIT`, roughly x1.25 |
+| `CGROUP_MEM_LIMIT` | the kernel's memory cap in bytes, used when starting under a cgroup: above it, the kernel kills a secondary. Must be above `GLOBAL_MEM_LIMIT`, roughly x1.25 |
 | `RESULTS_DIR` | where task results are saved |
 | `TASK_TYPES` | the task types users may run |
 | `HDB_DIR` | an HDB for the secondaries to load, if your tasks need one |
@@ -48,7 +50,19 @@ x src/primary.q -p $PRIMARY_PORT
 systemd-run --user --scope -p MemoryMax=$CGROUP_MEM_LIMIT -p MemorySwapMax=0 $KDBX_HOME/bin/q src/primary.q -p $PRIMARY_PORT
 ```
 
-There are two caps. `GLOBAL_MEM_LIMIT` is the framework's: above it, dispatch pauses. `CGROUP_MEM_LIMIT` is the kernel's: above it, the kernel kills a process in the cgroup (a secondary, never the primary). The kernel's cap must be higher. With swap off, the kernel acts the moment a process tries to go past its cap, so if the two were equal, the framework would never get to pause. The gap gives tasks already running room to keep growing after dispatch has paused.
+There are two caps. `GLOBAL_MEM_LIMIT` is the framework's: above it, dispatch pauses. `CGROUP_MEM_LIMIT` is the kernel's: above it, the kernel kills a process in the cgroup (a secondary, never the primary). The kernel's cap must be higher. With swap off, the kernel acts the moment a process tries to go past its cap, so if the two were equal, the framework would never get to pause. The gap gives tasks already running room to keep growing after dispatch has paused. Every secondary sets its `oom_score_adj` to 1000 when it starts, and the primary keeps 0, so when the cgroup runs out of memory the kernel picks a secondary.
+
+Or use the scripts, which load the config themselves and run the primary in the background:
+```bash
+bin/startprimary.sh                  # under a cgroup capped at CGROUP_MEM_LIMIT
+USE_CGROUP=0 bin/startprimary.sh     # without the kernel's cap
+bin/startsecondary.sh 9              # start one more secondary by hand
+bin/stopall.sh                       # stop the primary and every secondary for this config
+```
+Each script takes the config file as its last argument (default `config/default.env`). Logs go to `logs/`, and the primary's pid to `logs/primary.pid`. To check the kernel's cap on a running primary:
+```bash
+cat /sys/fs/cgroup$(cut -d: -f3 /proc/$(cat logs/primary.pid)/cgroup)/memory.max
+```
 
 
 After starting the primary it will spin up secondaries itself, current default amount is 8.
@@ -59,7 +73,7 @@ To check that it's up, in the primary:
 ```
 
 ### Stopping primary and secondaries
-To stop everything, quit the primary (`\\`): it asks its secondaries to exit, and kills any still running after `STOP_GRACE_PERIOD_SECS`. To start one more secondary from the primary, use `.primary.spawn <next available id>`.
+To stop everything, quit the primary (`\\`): it asks its secondaries to exit, and kills any still running after `STOP_GRACE_PERIOD_SECS`. To start one more secondary from the primary, use `.primary.spawn <next available id>`. From a shell, `bin/stopall.sh` stops everything the same way, and kills anything still running after the grace period.
 
 ## Running a task
 
@@ -137,6 +151,24 @@ A job is refused before anything runs if:
 `restarts` stays 0 until restarting lost secondaries is added. A closed secondary keeps its
 last memory reading in the table but is not counted in the total.
 
+## Failures
+
+- **Errors** in a task's own code are reported (`failed`, reason `error`) and not retried.
+- **A secondary that dies mid-task:** its task fails as `lost` and is retried on another
+  secondary. The secondary is restarted, up to `RESPAWN_MAX` times.
+- **A task that runs too long:** it fails as `timeout` and isn't retried. Its secondary is
+  killed, since a busy q process can't be interrupted, and then restarted.
+- **A secondary the kernel kills for memory** (over `CGROUP_MEM_LIMIT`): its task fails as `oom`
+  and isn't retried, since the same args would need the same memory again. Its `memafter` records
+  the kernel's cap. The secondary is restarted, up to `RESPAWN_MAX` times.
+
+Per task, `timeout` and `retriesmax` can be set when it's submitted; otherwise
+`TASK_TIMEOUT_MS` and `TASK_RETRIES_MAX` apply:
+```q
+.primary.newtask ([tasktype:`sleep; args:10; timeout:00:00:02.000; retriesmax:1i])
+```
+More detail, including the order things happen in, is in [How it works](docs/howitworks.md#failures), and how a memory kill is spotted is in [Memory kills](docs/howitworks.md#memory-kills).
+
 ## Memory polling
 
 All memory figures come from the kernel, in `/proc/<pid>/status`, in bytes. The framework doesn't use `.Q.w[]`: the kernel's figures are what it actually enforces, and they can be read from outside a process, which matters because a secondary running a task can't answer.
@@ -165,6 +197,7 @@ select id, status, rssanon, memtime from secondaries
 ```
 
 **A known overstatement.** A task's `memafter − membefore` includes file pages it read: the peak counts them, but "before" doesn't. For a task that reads an HDB, that's the heap it used **plus** the pages it touched: on a 31-day query, about 145MB more. For tasks that only compute, it's accurate. The kernel keeps no peak for the heap alone, and q's `.Q.w[]`peak` can't be reset for each task, so VmHWM is the only per-task peak available. The error is on the safe side: the cgroup counts file pages too, and an estimate thats too high holds tasks back rather than letting too many run.
+
 
 ## Tests
 
