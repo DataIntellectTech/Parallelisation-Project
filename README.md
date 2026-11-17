@@ -166,6 +166,70 @@ select id, status, rssanon, memtime from secondaries
 
 **A known overstatement.** A task's `memafter − membefore` includes file pages it read: the peak counts them, but "before" doesn't. For a task that reads an HDB, that's the heap it used **plus** the pages it touched: on a 31-day query, about 145MB more. For tasks that only compute, it's accurate. The kernel keeps no peak for the heap alone, and q's `.Q.w[]`peak` can't be reset for each task, so VmHWM is the only per-task peak available. The error is on the safe side: the cgroup counts file pages too, and an estimate thats too high holds tasks back rather than letting too many run.
 
+
+
+## Failures
+
+A task can fail in four ways. Each one is recorded in the task's `reason` and `err`, and only
+the reasons in `RETRY_REASONS` are retried.
+
+| Reason | What happened | Who notices | Retried | The secondary |
+|---|---|---|---|---|
+| `error` | the task's own code threw an error (or `savefailed`: its result couldn't be saved) | the secondary, which traps it and reports `failed` | no | stays free |
+| `sendfailed` | the primary couldn't send the task to the secondary | `.primary.sendtask` | yes | marked `stale` |
+| `lost` | the secondary's connection closed mid-task (crashed, killed) | `.z.pc` on the primary | yes | restarted |
+| `timeout` | the task ran past its timeout | `.primary.checktimeouts`, every second | no | killed, then restarted |
+
+`error` and `timeout` aren't retried by default: the same args would most likely fail again, or run
+as long again. `lost` and `sendfailed` are about the secondary, not the task, so another secondary
+should succeed.
+
+### Retries
+
+1. **Every move to `failed` goes through `.primary.taskupdate`,** which calls `.primary.retry`.
+2. **`retry` checks the reason and the count:** the reason must be in `RETRY_REASONS`, and the task's
+   `retrycount` must be under its `retriesmax` (`TASK_RETRIES_MAX` unless the task sets its own).
+3. **If both pass, the task goes back to `queued`** with `retrycount` up by one. The columns from the
+   failed run (`secondaryid`, times, memory, `err`, `reason`) are cleared.
+4. **`taskupdate` then dispatches straight away,** so the retry goes to a free secondary at once. It's
+   usually a different secondary, since the one that failed is closed or stale.
+
+There's no backoff: a retry is sent as soon as a secondary is free.
+
+### Timeouts
+
+A q process running a task can't be interrupted from outside: the task blocks its main loop until
+it finishes. So a task that runs too long is stopped by killing its secondary.
+
+1. **Every second, `.primary.checktimeouts` looks for late tasks:** `dispatched` or `running` tasks
+   whose `timeout` has passed. The time counts from `startedtime`, or from `dispatchedtime` if the
+   secondary never reported running.
+2. **For each one, `.primary.timeout` acts in this order:**
+   - marks the secondary `closed`, so nothing else is sent to it;
+   - fails the task as `timeout`;
+   - kills the secondary's process (`kill -9`).
+3. **When the process dies, `.z.pc` fires.** It finds no task on the secondary (it was already
+   cleared), so it fails nothing, and it restarts the secondary.
+
+Because the check runs every second, a task fails between its timeout and about a second after it.
+
+### Restarting secondaries
+
+1. **`.z.pc` calls `.primary.respawnsecondary` for every secondary whose connection closes.**
+2. **Only secondaries this primary spawned are restarted.** They're the ones in `.primary.spawned`; a
+   secondary started by hand isn't.
+3. **Each id is restarted at most `RESPAWN_MAX` times.** The count is kept in `.primary.respawns` and
+   shown as `restarts` in `.primary.showstatus[]`. It never resets, so a secondary that keeps dying
+   stays `closed` once the limit is reached.
+4. **The new process starts with the same id** and registers again. Its row in `secondaries` is
+   replaced in full and it's `free`.
+
+Stopping the primary never restarts anything: `.primary.stop` empties `.primary.spawned` before the
+secondaries' connections close.
+
+A secondary killed mid-task:
+
+
 ## Tests
 
 ```bash
