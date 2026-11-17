@@ -85,6 +85,14 @@ if[count .secondary.hdb:getenv `HDB_DIR;
   @[{[p;r] p set r; (1b; p; hcount p)}[path]; res; {[e] (0b; e)}]
  };
 
+// we will set any secondarys oom_score to 1000 so it will be shut down first if the OS is out of memory
+.secondary.oomscore:{
+  oomscorepath:"/proc/",string[.z.i],"/oom_score_adj";
+  system "sh -c 'echo 1000 > ",oomscorepath,"'";
+  score:first system "cat ",oomscorepath;
+  $[score~"1000"; .log.info "oom_score_adj set to 1000"; .log.warn "could not set oom_score_adj, it is ",score];
+ };
+
 
 // if the primary's connection closes kill the secondary
 .z.pc:{[h]
@@ -95,6 +103,7 @@ if[count .secondary.hdb:getenv `HDB_DIR;
 
 // start sequence
 .secondary.start:{
+  .secondary.oomscore[];
   .secondary.handle:: .secondary.connect[];
   .secondary.resultsdir:: @[.secondary.handle; (`.primary.register; .secondary.info); {[error] .log.error "registering with the primary failed with error: ",error,". Will exit the process now"; exit 1}];
   .log.info "registered with the primary, saving results in ",.secondary.resultsdir;

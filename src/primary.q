@@ -40,6 +40,8 @@ system"l src/common/cgroup.q";
 .primary.taskstates:`queued`dispatched`running`done`failed;
 .primary.retryreasons:`$"," vs getenv`RETRY_REASONS;
 .primary.respawnmax:"J"$getenv`RESPAWN_MAX;                 // restarts allowed per spawned secondary; 0 or unset = never
+.primary.cgroupcap:"J"$getenv`CGROUP_MEM_LIMIT;             // the kernel's cap (MemoryMax), recorded as an oom-killed task's memafter
+.primary.oomkills:0N;                                       // the cgroup's oom_kill count at the last check
 
 // dict of secondaries ids to their pids that the primary started
 .primary.spawned:(`long$())!`int$();
@@ -149,7 +151,7 @@ system"l src/common/cgroup.q";
 .primary.stop:{
   .log.info "stopping secondaries";
   handles:exec handle from secondaries where not null handle, not status=`closed;
-  {[h] @[neg[h];(`.secondary.stop;::);{[e] ::}]} each handles;
+  {[h] @[{[h] neg[h](`.secondary.stop;::); neg[h][]}; h; {[e] ::}]} each handles;
   .os.sleep .primary.stopgraceperiod;
   left:p where .os.exists each "/proc/",/:string p:value .primary.spawned;
   if[count left;
@@ -289,6 +291,15 @@ system"l src/common/cgroup.q";
   .primary.spawn sid;
  };
 
+// checks if the kernal has killed a process in our cgroup since the last check
+.primary.oomkilled:{
+  n:.cgroup.oomkills .primary.cgroupdir;
+  if[null n; :0b];
+  if[n<=.primary.oomkills; :0b];
+  .primary.oomkills+:1;
+  1b
+ };
+
 // Claude with minor edits from me
 // read our own memory and every live secondary's from /proc in one call, store it, and add a history row
 // works for busy secondaries too: nothing is asked of them. A pid that has gone gets nulls until .z.pc closes it
@@ -330,14 +341,18 @@ system"l src/common/cgroup.q";
 
 
 // if a secondary loses connection mark it as closed, fail its task and try to respawn it if under RESPAWN_MAX
+// a task that fails due to oom is not retried
 .z.pc:{[h]
   secid: first exec id from secondaries where handle=h;
   if[null secid; :()];
   tid: first exec currenttask from `secondaries where id=secid;
   update status:`closed, handle:0Ni, currenttask: 0N from `secondaries where id=secid;
-  .log.info "secondary ",string[secid]," has closed its connection to the primary";
+  oom:.primary.oomkilled[];
+  .log.info "secondary ",string[secid]," has closed its connection to the primary",$[oom; ": killed by the kernel for using too much memory"; ""];
   if[not null tid;
-    r:([err:"secondary lost"; reason:`lost]);
+    r:$[oom;
+      ([err:"secondary killed by the kernel for using too much memory"; reason:`oom; memafter:.primary.memcap^.primary.cgroupcap]);
+      ([err:"secondary lost"; reason:`lost])];
     .primary.taskupdate[tid; `failed; r];
     .log.warn"task ",string[tid]," was on secondary ",string[secid]," marked it as failed due to ",string r`reason;
    ];
@@ -356,6 +371,8 @@ system"l src/common/cgroup.q";
   .os.mkdir .primary.resultsdir;
   .log.info "task results will be saved in ",.primary.resultsdir;
   .primary.pollmem[];
+  .primary.cgroupdir:: .cgroup.dir[];
+  .primary.oomkills:: .cgroup.oomkills .primary.cgroupdir;
   if[.primary.spawnsecondaries; .primary.spawn each 1+til .primary.numsecondaries];
   .timer.addjob.custom[`stalecheck; {.primary.check[]}; (); 1; 2; ()!()];
   .timer.addjob.custom[`dispatch; {.primary.dispatch[]}; (); 1; 2; ()!()];
