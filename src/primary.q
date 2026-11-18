@@ -42,6 +42,7 @@ system"l src/common/cgroup.q";
 .primary.respawnmax:"J"$getenv`RESPAWN_MAX;                 // restarts allowed per spawned secondary; 0 or unset = never
 .primary.cgroupcap:"J"$getenv`CGROUP_MEM_LIMIT;             // the kernel's cap (MemoryMax), recorded as an oom-killed task's memafter
 .primary.oomkills:0N;                                       // the cgroup's oom_kill count at the last check
+.primary.lastjobid:0;
 
 // dict of secondaries ids to their pids that the primary started
 .primary.spawned:(`long$())!`int$();
@@ -189,6 +190,85 @@ system"l src/common/cgroup.q";
   tid
  };
 
+// splits a job up into individual tasks; example uses below
+// .primary.newjob[`vwap; 2026.01.01 2026.01.02 2026.01.03; ([priority:1])]
+// .primary.newjob[`vwap; 2026.01.01 2026.01.02 2026.01.03; ()!()]
+.primary.newjob:{[tasktype; args; params]
+  if[not tasktype in .primary.tasktypes; '"unknown task type ",string tasktype];
+  if[not count args; '"no args: a job needs at least one task"];
+  if[count bad:key[params] except key .primary.taskdefaults; '"unknown params ",(", " sv string bad),"; optional params are: ",", " sv string key .primary.taskdefaults];
+  params:@[.primary.taskdefaults, params; `priority`retriesmax; `int$];
+  if[count bad:where not (type each params)=type each .primary.taskdefaults; '"wrong type for ",", " sv {string[x]," (should be like ",.Q.s1[.primary.taskdefaults x],")"} each bad];
+  est:.primary.estimatemem[tasktype; args];
+  if[not est`run;
+    .log.warn "job refused for ",string[.z.u],": ",est`reason;
+    '"job refused: ",est`reason];
+  if[null params`memestimate; params[`memestimate]:est`estimate];
+  ids:.primary.newtask each {y,([tasktype: x; args: z])}[tasktype;params] each args;
+  if[any null ids;
+    delete from `tasks where taskid in ids;
+    '"could not create every task for the job, see the log"];
+  jid:.primary.lastjobid+:1;
+  update jobid:jid, user:.z.u from `tasks where taskid in ids;
+  pri:params`priority;
+  `jobs upsert (jid; tasktype; .z.u;`int$count ids; pri; `running; .z.p; 0Np; 0N; "");
+  .log.info "new job ",string[jid]," for ",string[.z.u],": ",string[count ids]," ",string[tasktype]," tasks (",string[first ids],"..",string[last ids],"), priority ",string pri;
+  .primary.dispatch[];
+  jid
+ };
+
+// checks if a job has completed, if yes updates the total size of the result of it
+// if it fails anywhere cancels the rest of the job
+.primary.jobcheck:{[tid]
+  jid:first exec jobid from tasks where taskid = tid;
+  if[null jid; :()];
+  if[not `running ~ first exec state from jobs where jobid = jid; :()];
+  states:exec state from tasks where jobid = jid;
+  if[`failed in states;
+    fail:first 0!select taskid, reason, err from tasks where jobid = jid, state = `failed;
+    error:"task ",string[fail`taskid]," failed (",string[fail`reason],"): ",fail`err;
+    update state:`failed, finishedtime:.z.p, err:enlist error from `jobs where jobid = jid;
+    .primary.canceljob jid;
+    :.log.warn "job ",string[jid]," failed: ",error];
+  if[all states=`done;
+    bytesize:exec sum resultbytes from tasks where jobid=jid;
+    update state:`done, finishedtime:.z.p, resultbytes:bytesize from `jobs where jobid = jid;
+    .log.info "job ",string[jid]," is done: ",string[count states]," tasks, ",.primary.mb bytesize];
+ };
+
+// if a task fails that is part of a bigger job it will cancel the remaining tasks for that job that havent started
+.primary.canceljob:{[jid]
+  qdtasks:exec taskid from tasks where jobid = jid, state = `queued;
+  if[not count qdtasks; :()];
+  .primary.taskupdate[; `failed; ([err:"cancelled: another part of job ",string[jid]," failed"; reason:`cancelled])] each qdtasks;
+  .log.warn "job ",string[jid],": cancelled ",string[count qdtasks]," queued tasks";
+ };
+
+// get the paths to where the result was saved for all tasks under the same jobid
+// example run; raze get each .primary.jobpaths 1
+.primary.jobpaths:{[jid]
+  state:first exec state from jobs where jobid = jid;
+  if[not `done ~ state; '"job ",string[jid]," is ",string state];
+  exec resultpath from tasks where jobid = jid, not null resultpath
+ };
+
+// Claude
+// what earlier tasks say about a job's memory, checked for the whole job at once; history is the in-memory tasks table
+// returns ([estimate: bytes, 0N if unknown; run: 1b if the job may run; reason: "" or why not])
+.primary.estimatemem:{[ttype; jobargs]
+  h:0!select args, state, reason, used:memafter-membefore, memafter from tasks where tasktype=ttype, state in `done`failed;
+  if[not count h; :([estimate:0N; run:1b; reason:""])];   // never run before: nothing to go on, so let it run and learn from it
+  est:max 0N,exec used from h where state=`done;
+  if[(not null .primary.memcap) and est>=.primary.memcap;
+    :([estimate:est; run:0b; reason:string[ttype]," tasks need about ",.primary.mb[est],", at or over the cap of ",.primary.mb .primary.memcap])];
+  seen:select from h where (-8!'first each args) in -8!'jobargs;
+  kcap:.primary.memcap^.primary.cgroupcap;
+  if[(not null kcap) and count kills:select from seen where reason=`oom, memafter>=kcap;
+    :([estimate:est; run:0b; reason:string[count distinct -8!'first each kills`args]," of this job's ",string[ttype],
+      " args were killed for memory before, under a ",.primary.mb[max kills`memafter]," cap (e.g. ",(-3!first first kills`args),"); the kernel's cap is ",.primary.mb kcap])];
+  ([estimate:est|max 0N,exec memafter from seen where reason=`oom; run:1b; reason:""])
+ };
+
 // update task status using .primary.taskchange and .primary.statustime
 // params allows us to update other columns eg. retriesmax and retrycount
 // if nothing for params it should be an empty dict
@@ -213,7 +293,7 @@ system"l src/common/cgroup.q";
     if[`memaftergc in key params;
       if[not null params`memaftergc; update rssanon:params`memaftergc from `secondaries where id=sid]]];
   if[newstate=`failed; .primary.retry tid];
-  //if[newstate in `done`failed; .primary.jobcheck tid]; // will add in once adding jobs bit
+  if[newstate in `done`failed; .primary.jobcheck tid];
   if[newstate in `done`failed; .primary.dispatch[]];  // prevents us waiting on the timer, when bench marking this was the biggest this was biggest bottleneck so added it
   1b
  };
@@ -225,7 +305,8 @@ system"l src/common/cgroup.q";
   t:tasks tid;
   update status:`busy, currenttask:tid from `secondaries where id=sid;
   .primary.taskupdate[tid; `dispatched; ([secondaryid: sid])];
-  res:@[neg[h]; (`.secondary.runtask; tid; t`tasktype; first t`args); {[error] (`sendfailed; error)}];
+  savepath:$[null t`jobid; "nojob/",string tid; string[t`jobid],"/",string tid];
+  res:@[neg[h]; (`.secondary.runtask; tid; t`tasktype; first t`args; savepath); {[error] (`sendfailed; error)}];
   if[`sendfailed~ first res;
     .log.warn "cannot send task ",string[tid]," to secondary ",string sid;
     update status:`stale, currenttask: 0N from `secondaries where id=sid;
@@ -241,7 +322,8 @@ system"l src/common/cgroup.q";
   if[.primary.overcap[]; :()];
   freesec: exec id from secondaries where status=`free;
   if[not count freesec; :()];
-  qtasks: exec taskid from `priority xdesc 0!select taskid, priority from tasks where state=`queued;
+  failedjobs:exec jobid from jobs where state=`failed;
+  qtasks: exec taskid from `priority xdesc 0!select taskid, priority from tasks where state=`queued, not jobid in failedjobs;
   if[not count qtasks; :()];
   //qtasks:.primary.fit[qtasks; count freesec]; // will add in once we add in mem cap logic
   n:min count[freesec], count qtasks;

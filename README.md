@@ -8,6 +8,7 @@ One **primary** process and N **secondary** processes run on one machine.
 
 - **The primary** owns the task queue. It decides which task runs where and watches memory against one cap for the primary and every secondary together (`GLOBAL_MEM_LIMIT`). It holds back new work while memory is over that cap.
 - **The secondaries** run tasks, one at a time. They report back to the primary: status, memory, results. After each task they run `.Q.gc[]`, so its memory is returned before the next one.
+- **Jobs:** work is submitted as a job, one task type and a list of args. The primary makes one task per arg and spreads them across the secondaries. Each secondary saves its result to disk and returns only the path, so results never pass through the primary.
 - **Global memory cap:** the primary reads its own and every secondary's memory every second, busy secondaries included. While the total is over `GLOBAL_MEM_LIMIT`, no new task is sent; dispatch resumes once memory falls back under. Tasks already running carry on.
 
 ## Getting started
@@ -75,9 +76,10 @@ To check that it's up, in the primary:
 ### Stopping primary and secondaries
 To stop everything, quit the primary (`\\`): it asks its secondaries to exit, and kills any still running after `STOP_GRACE_PERIOD_SECS`. To start one more secondary from the primary, use `.primary.spawn <next available id>`. From a shell, `bin/stopall.sh` stops everything the same way, and kills anything still running after the grace period.
 
-## Running a task
+## Running a job
 
-Tasks are submitted as **jobs**, from any q session.
+Work is submitted as **jobs**, from any q session. A job is one task type and a list of args: the primary
+makes one task per arg and runs them across the secondaries.
 ```q
 h:hopen 45000
 
@@ -91,15 +93,16 @@ h({jobs x}; j)
 paths:h(`.primary.jobpaths; j)
 raze get each paths
 ```
+For several inputs per task, pass a table: each row becomes one task's args, as a dict.
 
-**Params,** for every task of the job:
+**Params,** for every task of the job (`()!()` for none):
 
-| Param | Default | Meaning |
-|---|---|---|
-| `priority` | 0 | higher goes first; ties go oldest first |
-| `timeout` | `TASK_TIMEOUT_MS` | a task running longer than this has its secondary killed |
-| `retriesmax` | `TASK_RETRIES_MAX` | how many retries, for the reasons in `RETRY_REASONS` |
-| `memestimate` | learnt | the memory each task is expected to use, in bytes |
+| Param | Type | Default | Meaning |
+|---|---|---|---|
+| `priority` | int | 0 | higher goes first; ties go oldest first |
+| `timeout` | time | `TASK_TIMEOUT_MS` | a task running longer than this has its secondary killed |
+| `retriesmax` | int | `TASK_RETRIES_MAX` | how many retries, for the reasons in `RETRY_REASONS` |
+| `memestimate` | long | learnt | the memory each task is expected to use, in bytes; learnt from earlier tasks of the type if not given |
 
 For example:
 ```q
@@ -108,15 +111,28 @@ h(`.primary.newjob; `vwap; 2014.04.21 2014.04.22; ([priority:10; timeout:00:00:3
 
 **Other calls:**
 ```q
-h(`.primary.canceljob; j)                                   / cancel the job's queued tasks
-h({select taskid, state, reason, err from tasks where jobid=x}; j)
-h".primary.status[]"                                         / the status as a dict
+h({select taskid, state, reason, err from tasks where jobid=x}; j)   / the job's tasks
+h(`.primary.canceljob; j)                                           / cancel its queued tasks
+h".primary.status[]"                                                / the status as a dict
 ```
 
-A job is refused before anything runs if:
-- its task type isn't approved; or
-- earlier tasks of the type needed more memory than the cap; or
-- any of its args were killed for memory before, under the same cap or a lower one. Raising the cap lets them run again.
+**A job is refused before anything runs** (the call errors and no task is made) if:
+- its task type isn't approved, or it has no args;
+- a param is unknown, or of the wrong type (`priority` and `retriesmax` accept any whole number);
+- earlier tasks of its type needed at least `GLOBAL_MEM_LIMIT`, so it could never fit;
+- any of its args were killed for memory before, under a kernel cap (`CGROUP_MEM_LIMIT`) at least as
+  high as now. Raising that cap lets them run again.
+
+**A job fails** as soon as one of its tasks fails for good, that is, after any retries. Its queued tasks
+are then cancelled and never sent; tasks already running finish. `err` on the job says which task failed
+and why.
+
+**Results** are saved under `RESULTS_DIR/<primary start time>/<jobid>/<taskid>`. A task submitted on its
+own, outside a job, goes under `RESULTS_DIR/<primary start time>/nojob/<taskid>`.
+
+Each job and its tasks record the user who submitted it (`.z.u`: the name the client gives, not checked).
+
+More detail, including the memory estimate and every error message, is in [Jobs](docs/jobs.md).
 
 **Adding a task type:**
 1. Add the function to `src/approvedtasks.q`. It takes exactly one argument; for several inputs, use a dict.
@@ -148,8 +164,7 @@ A job is refused before anything runs if:
     ...
     tasks: 0 queued, 0 dispatched, 0 running, 1 done, 1 failed
 
-`restarts` stays 0 until restarting lost secondaries is added. A closed secondary keeps its
-last memory reading in the table but is not counted in the total.
+A closed secondary keeps its last memory reading in the table but is not counted in the total.
 
 ## Failures
 

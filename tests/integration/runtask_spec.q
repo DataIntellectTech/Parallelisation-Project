@@ -1,6 +1,8 @@
 / end to end: a real secondary runs tasks it is sent and reports back to the primary
-/ dispatch isn't built yet, so .it.dispatch does on the primary by hand what .primary.dispatch will do:
-/ create the task, mark the secondary busy, move the task to dispatched, send it .secondary.runtask
+/ .it.dispatch does on the primary by hand what .primary.sendtask does, so each test controls which secondary
+/ gets the task and can send it as a different task type: create the task, mark the secondary busy, move the
+/ task to dispatched, send it .secondary.runtask with where to save the result (nojob/<taskid>, as for a task
+/ outside a job)
 / run: bash tests/integration.sh runtask
 system "l tests/helpers/it.q";
 
@@ -12,7 +14,7 @@ system "l tests/helpers/it.q";
     update status:`busy, currenttask:tid from `secondaries where id=sid;
     .primary.taskupdate[tid;`dispatched;enlist[`secondaryid]!enlist sid];
     h:first exec handle from secondaries where id=sid;
-    neg[h](`.secondary.runtask; tid; st; first tasks[tid]`args);
+    neg[h](`.secondary.runtask; tid; st; first tasks[tid]`args; "nojob/",string tid);
     tid}; sid; tt; st; a)
  };
 
