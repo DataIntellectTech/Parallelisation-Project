@@ -295,10 +295,10 @@ system"l src/common/cgroup.q";
     // the secondary has just given its memory back (.Q.gc[]): use its own after-gc figure until the next poll,
     // so dispatch sees the freed memory straight away instead of the last poll's reading
     if[`memaftergc in key params;
-      if[not null params`memaftergc; update rssanon:params`memaftergc from `secondaries where id=sid]]];
-  if[newstate=`failed; .primary.retry tid];
-  if[newstate in `done`failed; .primary.jobcheck tid];
-  if[newstate in `done`failed; .primary.dispatch[]];  // prevents us waiting on the timer, when bench marking this was the biggest this was biggest bottleneck so added it
+      if[not null params`memaftergc; update rssanon:params`memaftergc from `secondaries where id=sid]];
+    if[newstate=`failed; .primary.retry tid];
+    .primary.jobcheck tid;
+    .primary.dispatch[]];  // prevents us waiting on the timer, when benchmarking this was the biggest this was biggest bottleneck so added it
   1b
  };
 
