@@ -69,7 +69,7 @@ system "l src/approvedtasks.q";
     };
   should["refuse a job whose task type has needed more than the cap"]{
     / lower the framework's cap below what hold tasks have used
-    .it.q ({`.primary.memcap set x}; 100*.jb.mb);
+    .it.q ({`.primary.memcap set x; `.primary.cgroupcap set x}; 100*.jb.mb);
     e:.it.q ({@[{.primary.newjob . x}; x; {x}]}; (`hold; enlist ([mb:10; secs:1]); ()!()));
     1b musteq e like "job refused*";
     };

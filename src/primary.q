@@ -43,6 +43,8 @@ system"l src/common/cgroup.q";
 .primary.cgroupcap:"J"$getenv`CGROUP_MEM_LIMIT;             // the kernel's cap (MemoryMax), recorded as an oom-killed task's memafter
 .primary.oomkills:0N;                                       // the cgroup's oom_kill count at the last check
 .primary.lastjobid:0;
+.primary.minheadroom:0f^"F"$getenv`MIN_HEADROOM_FRACTION;
+.primary.estimatemargin:1f^"F"$getenv`ESTIMATE_MARGIN;
 
 // dict of secondaries ids to their pids that the primary started
 .primary.spawned:(`long$())!`int$();
@@ -255,17 +257,19 @@ system"l src/common/cgroup.q";
 // Claude
 // what earlier tasks say about a job's memory, checked for the whole job at once; history is the in-memory tasks table
 // returns ([estimate: bytes, 0N if unknown; run: 1b if the job may run; reason: "" or why not])
+// refused if the type has needed at least the kernel's cap (it couldn't run even on its own), or if an arg was killed
+// for memory while running on its own; an arg killed while sharing the machine is estimated at the cap, so V2 runs it alone
 .primary.estimatemem:{[ttype; jobargs]
-  h:0!select args, state, reason, used:memafter-membefore, memafter from tasks where tasktype=ttype, state in `done`failed;
+  h:0!select args, state, reason, used:memafter-membefore, memafter, memestimate from tasks where tasktype=ttype, state in `done`failed;
   if[not count h; :([estimate:0N; run:1b; reason:""])];   // never run before: nothing to go on, so let it run and learn from it
   est:max 0N,exec used from h where state=`done;
-  if[(not null .primary.memcap) and est>=.primary.memcap;
-    :([estimate:est; run:0b; reason:string[ttype]," tasks need about ",.primary.mb[est],", at or over the cap of ",.primary.mb .primary.memcap])];
+  kcap:.primary.memcap^.primary.cgroupcap;                // the kernel's cap: CGROUP_MEM_LIMIT, or GLOBAL_MEM_LIMIT if that isn't set
+  if[(not null kcap) and est>=kcap;
+    :([estimate:est; run:0b; reason:string[ttype]," tasks need about ",.primary.mb[est],", at or over the kernel's cap of ",.primary.mb kcap])];
   seen:select from h where (-8!'first each args) in -8!'jobargs;
-  kcap:.primary.memcap^.primary.cgroupcap;
-  if[(not null kcap) and count kills:select from seen where reason=`oom, memafter>=kcap;
+  if[(not null kcap) and count kills:select from seen where reason=`oom, memafter>=kcap, memestimate>=memafter;
     :([estimate:est; run:0b; reason:string[count distinct -8!'first each kills`args]," of this job's ",string[ttype],
-      " args were killed for memory before, under a ",.primary.mb[max kills`memafter]," cap (e.g. ",(-3!first first kills`args),"); the kernel's cap is ",.primary.mb kcap])];
+      " args were killed for memory while running on their own, under a ",.primary.mb[max kills`memafter]," cap (e.g. ",(-3!first first kills`args),"); the kernel's cap is ",.primary.mb kcap])];
   ([estimate:est|max 0N,exec memafter from seen where reason=`oom; run:1b; reason:""])
  };
 
@@ -325,7 +329,7 @@ system"l src/common/cgroup.q";
   failedjobs:exec jobid from jobs where state=`failed;
   qtasks: exec taskid from `priority xdesc 0!select taskid, priority from tasks where state=`queued, not jobid in failedjobs;
   if[not count qtasks; :()];
-  //qtasks:.primary.fit[qtasks; count freesec]; // will add in once we add in mem cap logic
+  qtasks:.primary.fit[qtasks; count freesec];
   n:min count[freesec], count qtasks;
   .primary.sendtask'[n#freesec; n#qtasks];
  };
@@ -337,8 +341,37 @@ system"l src/common/cgroup.q";
   if[t[`retrycount]>=t`retriesmax;
     .log.warn "task ",string[tid]," has used all ",string[t`retriesmax]," retries, leaving it failed";
     :0b];
-  .log.info "retrying task ",string[tid],", retry ",string[1+t`retrycount]," of ",string t`retriesmax;
-  .primary.taskupdate[tid; `queued; ([retrycount:1i+t`retrycount; secondaryid:0N; dispatchedtime:0Np; startedtime:0Np; finishedtime:0Np; membefore:0N; memafter:0N; memaftergc:0N; err:""; reason:`])];
+  oom:`oom=t`reason;
+  kernalcap:.primary.memcap^.primary.cgroupcap;
+  if[oom and t[`memestimate]>=kernalcap;
+    .log.warn "task ",string[tid]," was killed for memory while running on its own, leaving it failed";
+    :0b];
+  .log.info "retrying task ",string[tid],", retry ",string[1+t`retrycount]," of ",string[t`retriesmax],$[oom; ", on its own"; ""];
+  .primary.taskupdate[tid; `queued; ([retrycount:1i+t`retrycount; memestimate:$[oom; kernalcap; t`memestimate]; secondaryid:0N; dispatchedtime:0Np; startedtime:0Np; finishedtime:0Np; membefore:0N; memafter:0N; memaftergc:0N; err:""; reason:`])];
+ };
+
+// Claude
+// memory in use, or about to be, in bytes: the primary, plus each live secondary's memory now or, for a busy one,
+// its task's estimate if that's more: a task that has just started hasn't grown yet
+.primary.committedmem:{
+  s:select rssanon, currenttask from secondaries where status<>`closed;
+  taskest:0^(exec taskid!memestimate from tasks) s`currenttask;   // 0 for a free secondary or a task with no estimate
+  (0^.primary.selfmem) + sum (0^s`rssanon)|taskest
+ };
+
+// Claude with edits from me
+// V2: which of the queued tasks (already in dispatch order) to send now, at most n. Each goes only if what it needs
+// (its estimate times ESTIMATE_MARGIN) fits in what's left under the cap, keeping MIN_HEADROOM_FRACTION of the cap
+// spare; what's sent is reserved, so one dispatch can't hand out the same memory twice. A task that doesn't fit
+// waits and a smaller one behind it can go. A task with no estimate goes while any memory is left (it's how a new
+// type is learnt). With nothing running, the first task always goes, so it can't wait for ever. No cap: first n go
+.primary.fit:{[qtasks; n]
+  if[null .primary.memcap; :n sublist qtasks];
+  headroom:.primary.memcap-.primary.committedmem[]+.primary.minheadroom*.primary.memcap;
+  need:0^`long$ceiling .primary.estimatemargin*(exec taskid!memestimate from tasks) qtasks;
+  if[not count select from secondaries where status=`busy; headroom:headroom|first need];
+  left:headroom {[room;x] $[x<=room; room-x; room]}\ need;   // what's left after each task: one that fits uses its need
+  n sublist qtasks where need<=headroom,-1_left                  // a task fits if it needs no more than was left before it
  };
 
 // Claude with minor edits from me
@@ -423,7 +456,7 @@ system"l src/common/cgroup.q";
 
 
 // if a secondary loses connection mark it as closed, fail its task and try to respawn it if under RESPAWN_MAX
-// a task that fails due to oom is not retried
+// a task killed for memory (oom) is retried once, on its own: see .primary.retry
 .z.pc:{[h]
   secid: first exec id from secondaries where handle=h;
   if[null secid; :()];
@@ -449,6 +482,8 @@ system"l src/common/cgroup.q";
 .primary.start:{
   .primary.starttime:: .z.p;
   if[not count .primary.resultsroot; '"RESULTS_DIR is not set"];
+  if[not .primary.minheadroom within 0 0.99; '"MIN_HEADROOM_FRACTION must be from 0 to 0.99"];
+  if[not .primary.estimatemargin>0; '"ESTIMATE_MARGIN must be above 0"];
   .primary.resultsdir::.primary.resultsroot,"/",ssr[string .primary.starttime;":";"."];
   .os.mkdir .primary.resultsdir;
   .log.info "task results will be saved in ",.primary.resultsdir;

@@ -1,5 +1,5 @@
 / unit specs for jobs: .primary.newjob (params, type check, memory estimate), .primary.jobcheck (via taskupdate),
-/ .primary.canceljob, .primary.jobpaths and .primary.estimatemem
+/ .primary.canceljob, .primary.jobpaths, .primary.estimatemem and retrying tasks killed for memory
 / loads primary.q once (spawning off). No secondaries are registered, so nothing is dispatched: each test moves a
 / job's tasks through their states with .primary.taskupdate, as a secondary would, and saves results by hand
 / run: tests/run.sh tests/unit/jobs_spec.q
@@ -336,10 +336,12 @@ if[not `primary in key `; system "l src/primary.q"];
   t
  };
 
-/ history: a task of tt with arg killed for memory under a cap of capmb MB (memafter holds the cap, as .z.pc sets it)
+/ history: a task of tt with arg killed for memory under a cap of capmb MB while running on its own: memafter holds
+/ the cap (as .z.pc sets it) and memestimate is the cap (as a retried oom task has, so V2 sent it alone)
 .ut.esoom:{[tt;arg;capmb]
   t:first .ut.jbtids .primary.newjob[tt; enlist arg; ()!()];
   .ut.jbrun t;
+  update memestimate:capmb*.ut.esmb from `tasks where taskid=t;
   .primary.taskupdate[t;`failed;([err:"killed"; reason:`oom; memafter:capmb*.ut.esmb])];
   t
  };
@@ -406,6 +408,15 @@ if[not `primary in key `; system "l src/primary.q"];
     `.primary.memcap mock 2000*.ut.esmb;
     (1000*.ut.esmb) musteq .primary.estimatemem[`sumtil; enlist 50]`estimate;
    };
+  should["not refuse an arg killed while sharing the machine, but estimate it at the cap"]{
+    t:first .ut.jbtids .primary.newjob[`sumtil; enlist 50; ()!()];
+    .ut.jbrun t;
+    / no cap-sized estimate when it was killed: other tasks were running alongside it
+    .primary.taskupdate[t;`failed;([err:"killed"; reason:`oom; memafter:1000*.ut.esmb])];
+    e:.primary.estimatemem[`sumtil; enlist 50];
+    1b musteq e`run;
+    (1000*.ut.esmb) musteq e`estimate;
+    };
  };
 
 .tst.desc[".primary.newjob - the memory estimate"]{
@@ -458,5 +469,41 @@ if[not `primary in key `; system "l src/primary.q"];
     .ut.esoom[`sumtil; 50; 1250];
     `.primary.memcap mock 3000*.ut.esmb;
     0b musteq .primary.estimatemem[`sumtil; enlist 50]`run;
+    };
+  should["let a type that needed more than the framework's cap, but less than the kernel's, run"]{
+    / 1100MB: over the 1000MB framework cap, under the 1250MB kernel cap: under V2 it runs on its own
+    .ut.esdone[`sumtil; enlist 10; enlist 1100];
+    e:.primary.estimatemem[`sumtil; enlist 99];
+    1b musteq e`run;
+    (1100*.ut.esmb) musteq e`estimate;
+    };
+ };
+
+.tst.desc[".primary.retry - tasks killed for memory"]{
+  before{
+    .ut.jbmocks[];
+    .ut.jbreset[];
+    .tst.mock[`.primary.retryreasons; `lost`sendfailed`oom];
+    .tst.mock[`.primary.cgroupcap; 1250*1048576];
+    };
+  after{
+    system "rm -rf ",.ut.jbdir;
+    };
+  should["retry a task killed for memory, estimated at the kernel's cap, and keep its job running"]{
+    j:.ut.jbnew 2;
+    t:first .ut.jbtids j;
+    .ut.jbfail[t; `oom];
+    `queued musteq tasks[t]`state;
+    1i musteq tasks[t]`retrycount;
+    (1250*1048576) musteq tasks[t]`memestimate;
+    `running musteq jobs[j]`state;
+    };
+  should["not retry it again once it was killed while estimated at the cap"]{
+    j:.ut.jbnew 2;
+    t:first .ut.jbtids j;
+    .ut.jbfail[t; `oom];
+    .ut.jbfail[t; `oom];
+    `failed musteq tasks[t]`state;
+    `failed musteq jobs[j]`state;
     };
  };
