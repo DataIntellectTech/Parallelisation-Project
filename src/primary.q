@@ -43,7 +43,7 @@ system"l src/common/cgroup.q";
 .primary.cgroupcap:"J"$getenv`CGROUP_MEM_LIMIT;             // the kernel's cap (MemoryMax), recorded as an oom-killed task's memafter
 .primary.oomkills:0N;                                       // the cgroup's oom_kill count at the last check
 .primary.lastjobid:0;
-.primary.minheadroom:0f^"F"$getenv`MIN_HEADROOM_FRACTION;
+.primary.minheadroom:0f^"F"$getenv`MIN_HEADROOM;
 .primary.estimatemargin:1f^"F"$getenv`ESTIMATE_MARGIN;
 
 // dict of secondaries ids to their pids that the primary started
