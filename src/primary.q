@@ -482,7 +482,7 @@ system"l src/common/cgroup.q";
 .primary.start:{
   .primary.starttime:: .z.p;
   if[not count .primary.resultsroot; '"RESULTS_DIR is not set"];
-  if[not .primary.minheadroom within 0 0.99; '"MIN_HEADROOM_FRACTION must be from 0 to 0.99"];
+  if[not .primary.minheadroom within 0 0.99; '"MIN_HEADROOM must be from 0 to 0.99"];
   if[not .primary.estimatemargin>0; '"ESTIMATE_MARGIN must be above 0"];
   .primary.resultsdir::.primary.resultsroot,"/",ssr[string .primary.starttime;":";"."];
   .os.mkdir .primary.resultsdir;
