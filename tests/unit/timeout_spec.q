@@ -33,7 +33,7 @@ if[not `primary in key `; system "l src/primary.q"];
   .tst.mock[`.primary.tasktypes; `sumtil`sleep`fail];
   .tst.mock[`.primary.retryreasons; `lost`sendfailed];
   .tst.mock[`.primary.memcap; 0N];
-  .tst.mock[`.secondary.runtask; {[tid;tt;a] ::}];
+  .tst.mock[`.secondary.runtask; {[tid;tt;a;savepath] ::}];
   `.ut.tokills set `int$();
   .tst.mock[`.os.kill9; {[p] .ut.tokills,:p}];
  };

@@ -27,7 +27,7 @@ if[not `primary in key `; system "l src/primary.q"];
   .tst.mock[`.primary.respawns; (`long$())!`long$()];
   `.ut.rsspawns set `long$();
   .tst.mock[`.primary.spawn; {[n] .ut.rsspawns,:n}];
-  .tst.mock[`.secondary.runtask; {[tid;tt;a] ::}];
+  .tst.mock[`.secondary.runtask; {[tid;tt;a;savepath] ::}];
   `.ut.rskills set `int$();
   .tst.mock[`.os.kill9; {[p] .ut.rskills,:p}];
  };

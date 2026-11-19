@@ -29,7 +29,7 @@ if[not `primary in key `; system "l src/primary.q"];
   `.ut.pcwarns set 0;
   .tst.mock[`.log.warn; {[x] .ut.pcwarns+:1}];
   .tst.mock[`.primary.tasktypes; `sumtil`sleep`fail];
-  .tst.mock[`.secondary.runtask; {[tid;tt;a] ::}];
+  .tst.mock[`.secondary.runtask; {[tid;tt;a;savepath] ::}];
   / retries are tested in retry_spec.q, so a failed task stays failed here
   .tst.mock[`.primary.retryreasons; `$()];
  };

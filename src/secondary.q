@@ -54,7 +54,7 @@ if[count .secondary.hdb:getenv `HDB_DIR;
  };
 
 // secondary tells primary it is starting, record mem before, run task, record mem after result, .Q.gc[], save result, returns where result is saved and its size
-.secondary.runtask:{[tid; tasktype; args]
+.secondary.runtask:{[tid; tasktype; args; savepath]
   .secondary.send (`.primary.taskupdate; tid; `running; ()!());
   membefore:.mem.readandclear[]`rssanon;
   if[not tasktype in at: key .secondary.approvedtasks;
@@ -66,7 +66,7 @@ if[count .secondary.hdb:getenv `HDB_DIR;
     .Q.gc[];
     memaftergc:.secondary.rssanon[];
     :.secondary.fail[tid; `error; last res; ([membefore:membefore; memafter:memafter; memaftergc:.secondary.rssanon[]])]];
-  saved:.secondary.save[tid; last res];
+  saved:.secondary.save[savepath; last res];
   res:(::);
   .Q.gc[];
   memaftergc:.secondary.rssanon[];
@@ -76,12 +76,11 @@ if[count .secondary.hdb:getenv `HDB_DIR;
   .secondary.send (`.primary.taskupdate; tid; `done; ([resultpath: saved 1; resultbytes: saved 2; membefore: membefore; memafter: memafter; memaftergc: memaftergc]));
  };
 
-// save a task's result to the run's results folder: (1b; path; bytes), or (0b; error) if it couldn't be saved
-// this path will change when we add in jobs to
-// $RESPATH/primary_session/jobID/each_taskID
-.secondary.save:{[tid; res]
+// save a task's result under the run's results folder, at savepath: <jobid>/<taskid>, or nojob/<taskid> for a task not ran through a job
+// returns (1b; path; bytes), or (0b; error) if it couldn't be saved
+.secondary.save:{[savepath; res]
   if[(::)~res; :(1b; `; 0)];
-  path:hsym `$.secondary.resultsdir,"/",string tid;
+  path:hsym `$.secondary.resultsdir,"/",savepath;
   @[{[p;r] p set r; (1b; p; hcount p)}[path]; res; {[e] (0b; e)}]
  };
 
