@@ -118,6 +118,9 @@ Run the last line after the job is complete. Each task goes from about 2MB, to a
 **Point out:**
 - **Memory is read from the kernel (`/proc`), not from `.Q.w[]`.** It's what the cgroup enforces, and it can be read while a secondary is busy.
 - **The primary now knows that `hold` peaks at about 300MB.** That's used in the next section.
+- **RssAnon** is the heap things like tables/results/variables and this is what `.Q.gc[]` gives back
+- **RssFile** is mem mapped file like hdb cols, which are loaded on start up to the secondaries
+- the primary reads the memory stats of the secondaries with `.primary.pollmem` this is run every second. `.mem.read` is used for reading this data from the OS and is also used at key points in a secondaries task, before, after running a task and after the task is completed and `.Q.gc` is ran
 
 ## 5. Memory-aware dispatch
 
@@ -339,3 +342,11 @@ r~raze get each paths                     / 1b: the results don't need the prima
 - Starting more secondaries when the queue is deep and there's memory to spare.
 - Fairness between users.
 - Packaging it as a `di.parallel` module.
+- Editting message handlers to return result paths to user over IPC or block user until job is completed
+- More useful queries to run on secondaries with threads eg. a VWAP with a date range so each secondary could make use of peach
+
+**Benefits IMO**
+- big reporting tasks like a hdb which we need to get yearly data for that would kill a normal kdb proc as tasks are split up over different secondaries per date
+  - big dbmaint job
+  - big reporting
+- good for when hardware is limited as we can run multiple processes with a memory cap in their own cgroup, so any bad processes or cgroups will kill themselves instead of blocking other procs
