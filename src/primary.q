@@ -338,6 +338,9 @@ system"l src/common/cgroup.q";
 .primary.retry:{[tid]
   t:tasks tid;
   if[not t[`reason] in .primary.retryreasons; :0b];
+  if[not null t`jobid; if[not `running~jobs[t`jobid]`state;
+    .log.info "not retrying task ",string[tid],": its job ",string[t`jobid]," has already failed";
+    :0b]];
   if[t[`retrycount]>=t`retriesmax;
     .log.warn "task ",string[tid]," has used all ",string[t`retriesmax]," retries, leaving it failed";
     :0b];
@@ -361,7 +364,7 @@ system"l src/common/cgroup.q";
 
 // Claude with edits from me
 // V2: which of the queued tasks (already in dispatch order) to send now, at most n. Each goes only if what it needs
-// (its estimate times ESTIMATE_MARGIN) fits in what's left under the cap, keeping MIN_HEADROOM_FRACTION of the cap
+// (its estimate times ESTIMATE_MARGIN) fits in what's left under the cap, keeping MIN_HEADROOM of the cap
 // spare; what's sent is reserved, so one dispatch can't hand out the same memory twice. A task that doesn't fit
 // waits and a smaller one behind it can go. A task with no estimate goes while any memory is left (it's how a new
 // type is learnt). With nothing running, the first task always goes, so it can't wait for ever. No cap: first n go

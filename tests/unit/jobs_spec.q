@@ -192,6 +192,18 @@ if[not `primary in key `; system "l src/primary.q"];
     .ut.jbfail[first t; `error];
     1b musteq all 0i=exec retrycount from tasks where jobid=j;
     };
+  should["not retry a part that fails after its job has failed"]{
+    j:.ut.jbnew 3;
+    t:.ut.jbtids j;
+    .ut.jbrun t 0;
+    .ut.jbrun t 1;
+    .ut.jbfail[t 0; `error];
+    / the job is failed and task 3 is cancelled; now task 2 is lost, normally a retried reason
+    .ut.jbfail[t 1; `lost];
+    `failed musteq tasks[t 1]`state;
+    `lost musteq tasks[t 1]`reason;
+    0 musteq count select from tasks where jobid=j, state=`queued;
+    };
  };
 
 .tst.desc[".primary.jobpaths"]{
