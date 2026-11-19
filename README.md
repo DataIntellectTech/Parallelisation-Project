@@ -221,6 +221,46 @@ tests/run.sh tests/unit          # unit specs (qspec)
 bash tests/integration.sh        # end to end: starts a real primary and secondaries, using config/integration.env
 ```
 
+## Benchmarks
+
+The same work run three ways on homer (64 logical CPUs: 32 physical cores on 2 sockets). Each time is the average of 3 runs per task.
+
+| | `vwap`, 50 days | `sumtil`, 50 × 50,000,000 |
+|---|---|---|
+| KDB-X, `-s 0` (one thread) | 3.40s | 4.41s |
+| KDB-X, `-s 8` (`peach`) | 0.62s | 0.67s |
+| Framework, 8 secondaries, 1 thread each | 1.22s | 2.22s |
+
+- **`vwap`:** the VWAP by `date,sym` for each of the HDB's 50 days, one day per task. It reads from disk.
+- **`sumtil`:** `sum til 50000000`, 50 times. Pure compute, about 400MB per task.
+- **KDB-X:** `raze .task.vwap peach days` and `.task.sumtil peach n`, timed with `.z.P`.
+- **Framework:** one job of 50 tasks, `finishedtime - submittedtime` from `jobs`.
+
+**What the numbers say**
+- **The framework is 2–3 times faster than a single thread.**
+- **On small, even tasks like these, `peach` is faster than the framework:** about 2 times for `vwap` and 3.4 times for `sumtil`. Every framework task pays a fixed cost:
+  - reading memory from `/proc`, and resetting the peak;
+  - IPC;
+  - writing its result to disk;
+  - a `.Q.gc[]` afterwards.
+- **The bigger `sumtil` gap is mostly the gc.** Each task gives its 400MB back to the OS, so the next one has to get it again. `peach` threads keep their memory and reuse it.
+- **The cost is per task,** so it matters less as tasks get longer.
+- **What the extra time buys:**
+  - a task killed for memory takes out one secondary, not the whole process;
+  - a hung task is killed at its timeout;
+  - a global memory cap is enforced, and dispatch only sends what fits;
+  - each task's memory is measured and freed;
+  - results are on disk, and still there after the primary stops.
+
+  With `peach`, one memory kill or one error loses every thread's work.
+
+**To reproduce**
+- **Warm the cache first** by running each workload once. A cold `vwap` run takes several seconds, nearly all of it reading the HDB.
+- **KDB-X:** `x -s 8` (or `-s 0`), then load `src/approvedtasks.q` and the HDB.
+- **Framework:** start the primary, then submit `.primary.newjob[`vwap; days; ()!()]` and `.primary.newjob[`sumtil; 50#50000000; ()!()]`, one job at a time.
+
+Full steps are in [the demo guide](docs/demo.md#9-benchmarks).
+
 ## AI usage
 
 This project was built with the help of Claude

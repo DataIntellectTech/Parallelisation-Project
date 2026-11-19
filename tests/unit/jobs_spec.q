@@ -292,6 +292,12 @@ if[not `primary in key `; system "l src/primary.q"];
     0 musteq count jobs;
     0 musteq count tasks;
     };
+  should["error for a priority that isn't a number, naming it, and create nothing"]{
+    e:@[{.primary.newjob . x}; (`sumtil; 10 20; ([priority:`high])); {x}];
+    1b musteq e like "wrong type for priority*";
+    0 musteq count jobs;
+    0 musteq count tasks;
+    };
   should["accept retriesmax given as a long"]{
     j:.primary.newjob[`sumtil; 10 20; ([retriesmax:2])];
     2 2i mustmatch exec retriesmax from tasks where jobid=j;

@@ -199,7 +199,7 @@ system"l src/common/cgroup.q";
   if[not tasktype in .primary.tasktypes; '"unknown task type ",string tasktype];
   if[not count args; '"no args: a job needs at least one task"];
   if[count bad:key[params] except key .primary.taskdefaults; '"unknown params ",(", " sv string bad),"; optional params are: ",", " sv string key .primary.taskdefaults];
-  params:@[.primary.taskdefaults, params; `priority`retriesmax; `int$];
+  params:@[.primary.taskdefaults, params; `priority`retriesmax; {$[(abs type x) in 5 6 7h; `int$x; x]}];
   if[count bad:where not (type each params)=type each .primary.taskdefaults; '"wrong type for ",", " sv {string[x]," (should be like ",.Q.s1[.primary.taskdefaults x],")"} each bad];
   est:.primary.estimatemem[tasktype; args];
   if[not est`run;
