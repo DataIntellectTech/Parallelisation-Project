@@ -196,6 +196,7 @@ system"l src/common/cgroup.q";
 // .primary.newjob[`vwap; 2026.01.01 2026.01.02 2026.01.03; ([priority:1])]
 // .primary.newjob[`vwap; 2026.01.01 2026.01.02 2026.01.03; ()!()]
 .primary.newjob:{[tasktype; args; params]
+  args:$[(0>type args) or 99h=type args; enlist args; args];
   if[not tasktype in .primary.tasktypes; '"unknown task type ",string tasktype];
   if[not count args; '"no args: a job needs at least one task"];
   if[count bad:key[params] except key .primary.taskdefaults; '"unknown params ",(", " sv string bad),"; optional params are: ",", " sv string key .primary.taskdefaults];

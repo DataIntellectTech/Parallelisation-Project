@@ -94,6 +94,16 @@ if[not `primary in key `; system "l src/primary.q"];
     0 musteq count jobs;
     0 musteq count tasks;
     };
+  should["take a single value as a one-task job"]{
+    j:.primary.newjob[`sumtil; 10; ()!()];
+    1i musteq jobs[j]`ntasks;
+    10 musteq first exec first each args from tasks where jobid=j;
+    };
+  should["take a single dict as a one-task job"]{
+    j:.primary.newjob[`sumtil; `a`b!1 2; ()!()];
+    1i musteq jobs[j]`ntasks;
+    1 musteq count select from tasks where jobid=j;
+    };
   should["record who submitted the job, on the job and on each of its tasks"]{
     j:.primary.newjob[`sumtil; 10 20; ()!()];
     .z.u musteq jobs[j]`user;
