@@ -28,7 +28,7 @@ if[not `primary in key `; system "l src/primary.q"];
   .tst.mock[`.log.warn; {[x] .ut.dpwarns+:1}];
   .tst.mock[`.primary.tasktypes; `sumtil`sleep`fail];
   `.ut.dpsent set ();
-  .tst.mock[`.secondary.runtask; {[tid;tt;a] .ut.dpsent,:enlist (tid;tt;a); }];
+  .tst.mock[`.secondary.runtask; {[tid;tt;a;savepath] .ut.dpsent,:enlist (tid;tt;a); }];
   / retries are tested in retry_spec.q, so a failed send stays failed here
   .tst.mock[`.primary.retryreasons; `$()];
  };

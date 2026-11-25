@@ -38,7 +38,7 @@ if[not `primary in key `; system "l src/primary.q"];
   .tst.mock[`.primary.respawns; (`long$())!`long$()];
   `.ut.omspawns set `long$();
   .tst.mock[`.primary.spawn; {[n] .ut.omspawns,:n}];
-  .tst.mock[`.secondary.runtask; {[tid;tt;a] ::}];
+  .tst.mock[`.secondary.runtask; {[tid;tt;a;savepath] ::}];
  };
 
 .tst.desc[".primary.oomkilled"]{
